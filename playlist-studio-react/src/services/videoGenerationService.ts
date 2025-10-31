@@ -323,7 +323,11 @@ class VideoGenerationService {
       // Step 4: Read the output video
       const outputData = await this.ffmpeg.readFile(outputFileName);
       const outputBuffer = outputData as Uint8Array;
-      const videoBlob = new Blob([outputBuffer.buffer.slice(outputBuffer.byteOffset, outputBuffer.byteOffset + outputBuffer.byteLength)], { type: 'video/mp4' });
+      // Create a copy to ensure we have a proper ArrayBuffer (not SharedArrayBuffer)
+      const arrayBuffer = new ArrayBuffer(outputBuffer.byteLength);
+      const uint8Array = new Uint8Array(arrayBuffer);
+      uint8Array.set(outputBuffer);
+      const videoBlob = new Blob([uint8Array], { type: 'video/mp4' });
 
       // Cleanup
       await this.cleanupFiles([imageFileName, audioFileName, outputFileName]);
