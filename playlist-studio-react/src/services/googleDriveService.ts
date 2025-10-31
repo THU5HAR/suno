@@ -4,7 +4,6 @@ interface GoogleDriveConfig {
 }
 
 class GoogleDriveService {
-  private apiKey?: string;
   private clientId?: string;
   private accessToken?: string;
   private isInitialized = false;
@@ -12,7 +11,8 @@ class GoogleDriveService {
   async initialize(config?: GoogleDriveConfig): Promise<void> {
     if (this.isInitialized) return;
 
-    this.apiKey = config?.apiKey || process.env.VITE_GOOGLE_DRIVE_API_KEY;
+    // Note: apiKey is part of the config interface but not currently used
+    // Can be accessed via config?.apiKey if needed in the future
     this.clientId = config?.clientId || process.env.VITE_GOOGLE_DRIVE_CLIENT_ID;
 
     // Load Google Drive API

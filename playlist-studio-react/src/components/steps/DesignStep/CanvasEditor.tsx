@@ -45,7 +45,7 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(({
   const initStepRef = useRef<number>(currentStep);
   const stepDataRef = useRef(stepData);
   const saveCanvasDataRef = useRef(saveCanvasData);
-  const loadCanvasDataRef = useRef<((data: CanvasData) => void) | null>(null);
+  const loadCanvasDataRef = useRef<((data: CanvasData, skipClear?: boolean) => void) | null>(null);
   const exportCanvasDataRef = useRef<(() => CanvasData) | null>(null);
   
   // Keep refs in sync (but don't reload canvas when stepData changes - that causes flicker)
