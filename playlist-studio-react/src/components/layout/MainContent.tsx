@@ -9,6 +9,8 @@ import { ExportPanel } from '@/components/steps/ReviewStep/ExportPanel';
 import { ProjectSummary } from '@/components/steps/ReviewStep/ProjectSummary';
 import { Button } from '@/components/ui/Button';
 import { CanvasEditor } from '@/components/steps/DesignStep';
+import { ElementsPanel } from '@/components/steps/DesignStep/ElementsPanel';
+import { PropertiesPanel } from '@/components/steps/DesignStep/PropertiesPanel';
 import { useCanvas } from '@/context/CanvasContext';
 import { CANVAS_CONFIG } from '@/utils/constants';
 
@@ -128,27 +130,20 @@ const MainContent: React.FC = () => {
 
       case 2:
         return (
-          <div className="p-6">
-            <div className="text-center mb-8">
-              <h2 className="text-3xl font-semibold text-gray-900 mb-2">
-                Video Design & Thumbnail
-              </h2>
-              <p className="text-gray-600">
-                Design your video thumbnail and visual elements
-              </p>
-            </div>
-
-            <div className="space-y-6">
-              {/* Main Canvas Area - Full Width */}
-              <div className="flex justify-center">
-                <CanvasEditor
-                  ref={canvasEditorRef as React.RefObject<any>}
-                  width={CANVAS_CONFIG.width}
-                  height={CANVAS_CONFIG.height}
-                  className="w-full max-w-7xl"
-                />
-              </div>
-            </div>
+          <div className="flex h-full bg-gray-50">
+            {/* Left Sidebar - Elements & Assets (Canva-style) */}
+            <ElementsPanel />
+            
+            {/* Main Canvas Area - Centered (Canva-style) */}
+            <CanvasEditor
+              ref={canvasEditorRef as React.RefObject<any>}
+              width={CANVAS_CONFIG.width}
+              height={CANVAS_CONFIG.height}
+              className="flex-1"
+            />
+            
+            {/* Right Sidebar - Properties Panel (Canva-style) */}
+            <PropertiesPanel />
           </div>
         );
 
@@ -205,7 +200,7 @@ const MainContent: React.FC = () => {
   };
 
   return (
-    <div className="flex-1 bg-gray-50 overflow-y-auto">
+    <div className="flex-1 bg-gray-50 overflow-hidden">
       {renderStepContent()}
     </div>
   );

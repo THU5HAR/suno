@@ -86,7 +86,7 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(({
       const newBg = data.backgroundColor || '#ffffff';
       if (currentBg !== newBg) {
         canvas.setBackgroundColor(newBg, () => {
-          canvas.renderAll();
+          // Don't render here - will render at end
         });
       }
 
@@ -137,7 +137,6 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(({
                 if (objData.width) img.scaleToWidth(objData.width);
                 if (objData.height) img.scaleToHeight(objData.height);
                 canvas.add(img);
-                // Don't call renderAll() - Fabric.js auto-renders on add
               }
             }, { crossOrigin: 'anonymous' });
           }
@@ -148,11 +147,11 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(({
         if (objData.scaleX) fabricObject.scaleX = objData.scaleX;
         if (objData.scaleY) fabricObject.scaleY = objData.scaleY;
         canvas.add(fabricObject);
-        // Don't call renderAll() here - Fabric.js auto-renders on add
       }
     });
 
-    // Single render at the end instead of multiple
+    // Single render at the end - only once
+    canvas.renderOnAddRemove = true;
     canvas.renderAll();
     });
   }, []);
@@ -283,13 +282,17 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(({
         return;
       }
 
-      // Initialize Fabric.js canvas
+      // Initialize Fabric.js canvas with optimized settings
       const canvas = new FabricCanvas(canvasRef.current, {
         width,
         height,
         backgroundColor: '#ffffff',
         selection: true,
         preserveObjectStacking: true,
+        renderOnAddRemove: false, // Disable auto-render to prevent flicker
+        skipOffscreen: true, // Optimize performance
+        enableRetinaScaling: true,
+        stateful: false,
       });
 
       if (!isMounted) {
@@ -334,47 +337,56 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(({
         }, 1500); // Increased debounce to prevent flicker
       };
 
-      // Track dragging state
+      // Track dragging state - Fabric.js handles rendering during interactions automatically
+      // We just track state to prevent saves during interactions
       canvas.on('mouse:down', () => {
         isDragging = true;
+        // Fabric.js will handle rendering, we don't need to interfere
       });
       
       canvas.on('object:moving', () => {
         isDragging = true;
+        // Fabric.js auto-renders during move - no need to call renderAll()
       });
       
       canvas.on('object:scaling', () => {
         isModifying = true;
+        // Fabric.js auto-renders during scale - no need to call renderAll()
       });
       
       canvas.on('object:rotating', () => {
         isModifying = true;
+        // Fabric.js auto-renders during rotate - no need to call renderAll()
       });
 
-      // Save on mouse up - this is the key moment to save
+      // Save when interaction ends - Fabric.js handles rendering automatically
       const handleMouseUp = () => {
         isDragging = false;
         isModifying = false;
         // Small delay to ensure all transformations are complete
         setTimeout(() => {
           debouncedSave();
-        }, 100);
+        }, 200);
       };
       canvas.on('mouse:up', handleMouseUp);
       
-      // Also save when object modification ends
+      // Save when object modification ends
       canvas.on('object:modified', () => {
         isDragging = false;
         isModifying = false;
-        // Small delay to ensure modifications are complete
         setTimeout(() => {
           debouncedSave();
-        }, 100);
+        }, 200);
       });
       
-      // Save on object add/remove (these don't cause dragging)
-      canvas.on('object:added', debouncedSave);
-      canvas.on('object:removed', debouncedSave);
+      // Save on object add/remove (Fabric.js auto-renders)
+      canvas.on('object:added', () => {
+        debouncedSave();
+      });
+      
+      canvas.on('object:removed', () => {
+        debouncedSave();
+      });
       
       // Store the handlers for cleanup
       (canvas as any)._handleMouseUp = handleMouseUp;
@@ -421,11 +433,10 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(({
 
   const clearCanvas = useCallback(() => {
     if (!fabricCanvasRef.current) return;
-    fabricCanvasRef.current.clear();
-    fabricCanvasRef.current.setBackgroundColor('#ffffff', () => {
-      if (fabricCanvasRef.current) {
-        fabricCanvasRef.current.renderAll();
-      }
+    const canvas = fabricCanvasRef.current;
+    canvas.clear();
+    canvas.setBackgroundColor('#ffffff', () => {
+      canvas.renderAll();
     });
   }, []);
 
@@ -439,16 +450,18 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(({
         console.error('Rect not found');
         return;
       }
-    const rect = new Rect({
-      left: 100,
-      top: 100,
-      width: 100,
-      height: 100,
-      fill: '#ff0000',
-    });
+      const canvas = fabricCanvasRef.current!;
+      const rect = new Rect({
+        left: canvas.width ? canvas.width / 2 - 50 : 100,
+        top: canvas.height ? canvas.height / 2 - 50 : 100,
+        width: 100,
+        height: 100,
+        fill: '#3b82f6',
+      });
 
-      fabricCanvasRef.current!.add(rect);
-      // renderAll() not needed - Fabric.js auto-renders
+      canvas.add(rect);
+      canvas.setActiveObject(rect);
+      canvas.renderAll();
     });
   }, []);
 
@@ -462,15 +475,17 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(({
         console.error('Circle not found');
         return;
       }
-    const circle = new Circle({
-      left: 200,
-      top: 200,
-      radius: 50,
-      fill: '#00ff00',
-    });
+      const canvas = fabricCanvasRef.current!;
+      const circle = new Circle({
+        left: canvas.width ? canvas.width / 2 : 200,
+        top: canvas.height ? canvas.height / 2 : 200,
+        radius: 50,
+        fill: '#3b82f6',
+      });
 
-      fabricCanvasRef.current!.add(circle);
-      // renderAll() not needed - Fabric.js auto-renders
+      canvas.add(circle);
+      canvas.setActiveObject(circle);
+      canvas.renderAll();
     });
   }, []);
 
@@ -484,17 +499,20 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(({
         console.error('Textbox not found. Available:', Object.keys(fabricLib).filter(k => k.toLowerCase().includes('text')));
         return;
       }
-      const text = new Textbox('Hello World', {
-      left: 300,
-      top: 300,
+      const canvas = fabricCanvasRef.current!;
+      const text = new Textbox('Double click to edit', {
+        left: canvas.width ? canvas.width / 2 - 100 : 300,
+        top: canvas.height ? canvas.height / 2 : 300,
         width: 200,
-      fontSize: 20,
-      fill: '#000000',
+        fontSize: 32,
+        fill: '#1f2937',
         fontFamily: 'Arial',
+        textAlign: 'center',
       });
 
-      fabricCanvasRef.current!.add(text);
-      // renderAll() not needed - Fabric.js auto-renders
+      canvas.add(text);
+      canvas.setActiveObject(text);
+      canvas.renderAll();
     });
   }, []);
 
@@ -543,7 +561,8 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(({
           }
 
           canvas.add(img);
-          // renderAll() not needed - Fabric.js auto-renders
+          canvas.setActiveObject(img);
+          canvas.renderAll();
 
           // Cleanup object URL if it was created from a file
           if (urlOrFile instanceof File) {
@@ -570,13 +589,19 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(({
   }));
 
   return (
-    <div className={`canvas-editor ${className}`}>
-      <div className="canvas-container border border-gray-300 rounded-lg overflow-hidden flex justify-center">
+    <div className={`canvas-editor flex-1 flex items-center justify-center bg-gray-100 ${className}`}>
+      <div className="canvas-wrapper relative" style={{ 
+        boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
+      }}>
         <canvas 
           ref={canvasRef} 
           width={width} 
           height={height}
-          style={{ maxWidth: '100%', height: 'auto' }}
+          style={{ 
+            display: 'block',
+            backgroundColor: '#ffffff',
+            border: '1px solid #e5e7eb'
+          }}
         />
       </div>
     </div>
