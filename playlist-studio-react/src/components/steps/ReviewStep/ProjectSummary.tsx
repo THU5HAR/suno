@@ -1,5 +1,6 @@
 import React from 'react';
 import { usePlaylist } from '@/context/PlaylistContext';
+import { calculateTotalDuration, formatDuration } from '@/utils/helpers';
 
 export const ProjectSummary: React.FC = () => {
   const { playlist, feedback, assets, stepCompletion } = usePlaylist();
@@ -10,16 +11,7 @@ export const ProjectSummary: React.FC = () => {
   const completedSteps = Object.values(stepCompletion).filter(Boolean).length;
   const totalSteps = Object.keys(stepCompletion).length;
 
-  const formatDuration = (seconds: number): string => {
-    const minutes = Math.floor(seconds / 60);
-    const remainingSeconds = seconds % 60;
-    return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
-  };
-
-  const totalDuration = playlist.reduce((total) => {
-    // Assuming each song is approximately 3 minutes for demo
-    return total + 180;
-  }, 0);
+  const totalDuration = calculateTotalDuration(playlist);
 
   const stepNames = {
     1: 'Audio Selection',

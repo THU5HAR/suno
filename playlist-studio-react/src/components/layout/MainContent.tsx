@@ -5,7 +5,12 @@ import { Timeline } from '@/components/steps/AudioStep/Timeline';
 import { parseCSV, parseExcel } from '@/utils/helpers';
 import { useNotifications } from '@/context/NotificationContext';
 import { StitchPanel } from '@/components/steps/ReviewStep/StitchPanel';
+import { ExportPanel } from '@/components/steps/ReviewStep/ExportPanel';
+import { ProjectSummary } from '@/components/steps/ReviewStep/ProjectSummary';
 import { Button } from '@/components/ui/Button';
+import { CanvasEditor } from '@/components/steps/DesignStep';
+import { useCanvas } from '@/context/CanvasContext';
+import { CANVAS_CONFIG } from '@/utils/constants';
 
 const StitchedAudioPreview: React.FC = () => {
   const { stitchedAudioUrl, downloadStitchedAudio } = usePlaylist();
@@ -30,6 +35,7 @@ const StitchedAudioPreview: React.FC = () => {
 const MainContent: React.FC = () => {
   const { currentStep, addSong } = usePlaylist();
   const { showNotification } = useNotifications();
+  const { canvasEditorRef } = useCanvas();
   const [isProcessingFile, setIsProcessingFile] = useState(false);
 
   const renderStepContent = () => {
@@ -125,6 +131,32 @@ const MainContent: React.FC = () => {
           <div className="p-6">
             <div className="text-center mb-8">
               <h2 className="text-3xl font-semibold text-gray-900 mb-2">
+                Video Design & Thumbnail
+              </h2>
+              <p className="text-gray-600">
+                Design your video thumbnail and visual elements
+              </p>
+            </div>
+
+            <div className="space-y-6">
+              {/* Main Canvas Area - Full Width */}
+              <div className="flex justify-center">
+                <CanvasEditor
+                  ref={canvasEditorRef as React.RefObject<any>}
+                  width={CANVAS_CONFIG.width}
+                  height={CANVAS_CONFIG.height}
+                  className="w-full max-w-7xl"
+                />
+              </div>
+            </div>
+          </div>
+        );
+
+      case 3:
+        return (
+          <div className="p-6">
+            <div className="text-center mb-8">
+              <h2 className="text-3xl font-semibold text-gray-900 mb-2">
                 Stitch & Prepare Export
               </h2>
               <p className="text-gray-600">
@@ -137,6 +169,32 @@ const MainContent: React.FC = () => {
 
               {/* Stitched Audio Preview and Download */}
               <StitchedAudioPreview />
+            </div>
+          </div>
+        );
+
+      case 4:
+        return (
+          <div className="p-6">
+            <div className="text-center mb-8">
+              <h2 className="text-3xl font-semibold text-gray-900 mb-2">
+                Review & Export
+              </h2>
+              <p className="text-gray-600">
+                Review your complete project and export final files
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              {/* Export Panel */}
+              <div className="lg:col-span-2">
+                <ExportPanel />
+              </div>
+
+              {/* Project Summary */}
+              <div>
+                <ProjectSummary />
+              </div>
             </div>
           </div>
         );

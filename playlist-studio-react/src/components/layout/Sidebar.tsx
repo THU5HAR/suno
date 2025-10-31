@@ -6,6 +6,7 @@ import { AssetLibrary } from '@/components/steps/DesignStep/AssetLibrary';
 import { FeedbackSidebar } from '@/components/steps/AudioStep/FeedbackSidebar';
 import { Button } from '@/components/ui/Button';
 import { Asset } from '@/types';
+import { calculateTotalDuration, formatDuration } from '@/utils/helpers';
 
 const Sidebar: React.FC = () => {
   const { currentStep, playlist, clearAll, setCurrentStep } = usePlaylist();
@@ -142,9 +143,20 @@ const Sidebar: React.FC = () => {
                 Asset Library
               </div>
               <AssetLibrary
-                onAssetSelect={(asset: Asset) => {
-                  showNotification(`Selected asset: ${asset.name}`, 'info');
-                  // TODO: Implement adding asset to canvas
+                onAssetSelect={async (asset: Asset) => {
+                  if (asset.type === 'image') {
+                    try {
+                      if (canvasEditorRef.current?.addImage) {
+                        await canvasEditorRef.current.addImage(asset.url);
+                        showNotification(`Added ${asset.name} to canvas`, 'success');
+                      }
+                    } catch (error) {
+                      console.error('Failed to add image to canvas:', error);
+                      showNotification('Failed to add image to canvas', 'error');
+                    }
+                  } else {
+                    showNotification(`Asset type "${asset.type}" not yet supported for canvas`, 'info');
+                  }
                 }}
               />
             </div>
@@ -166,7 +178,7 @@ const Sidebar: React.FC = () => {
                   </div>
                   <div className="flex justify-between items-center">
                     <span className="text-sm text-gray-600">Duration:</span>
-                    <span className="font-semibold">0:00</span>
+                    <span className="font-semibold">{formatDuration(calculateTotalDuration(playlist))}</span>
                   </div>
                   <div className="flex justify-between items-center">
                     <span className="text-sm text-gray-600">Feedback:</span>

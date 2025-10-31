@@ -11,6 +11,7 @@ interface PlaylistContextType {
   currentStep: number;
   stepCompletion: Record<number, boolean>;
   stepData: Record<number, StepData>;
+  currentVideoUrl?: string;
   stitchedAudioUrl?: string;
   isGenerating: boolean;
   isEditMode: boolean;
@@ -32,6 +33,7 @@ interface PlaylistContextType {
   markStepCompleted: (step: number) => void;
   setEditMode: (isEdit: boolean) => void;
 
+  setCurrentVideoUrl: (url?: string) => void;
   setStitchedAudioUrl: (url?: string) => void;
   setIsGenerating: (generating: boolean) => void;
 
@@ -68,6 +70,7 @@ type PlaylistAction =
   | { type: 'MARK_STEP_COMPLETED'; payload: number }
   | { type: 'SET_STEP_COMPLETION'; payload: Record<number, boolean> }
   | { type: 'SET_EDIT_MODE'; payload: boolean }
+  | { type: 'SET_CURRENT_VIDEO_URL'; payload: string | undefined }
   | { type: 'SET_STITCHED_AUDIO_URL'; payload: string | undefined }
   | { type: 'SET_IS_GENERATING'; payload: boolean }
   | { type: 'UPDATE_PROCESSING_STATE'; payload: Partial<ProcessingState> }
@@ -82,6 +85,7 @@ const initialState: ProjectState = {
   currentStep: 1,
   stepCompletion: { 1: false, 2: false, 3: false, 4: false },
   stepData: {},
+  currentVideoUrl: undefined,
   stitchedAudioUrl: undefined,
   isGenerating: false,
   isEditMode: false,
@@ -196,6 +200,12 @@ function playlistReducer(state: ProjectState, action: PlaylistAction): ProjectSt
         isEditMode: action.payload,
       };
 
+    case 'SET_CURRENT_VIDEO_URL':
+      return {
+        ...state,
+        currentVideoUrl: action.payload,
+      };
+
     case 'SET_STITCHED_AUDIO_URL':
       return {
         ...state,
@@ -308,6 +318,10 @@ export const PlaylistProvider: React.FC<PlaylistProviderProps> = ({ children }) 
 
   const setEditMode = useCallback((isEdit: boolean) => {
     dispatch({ type: 'SET_EDIT_MODE', payload: isEdit });
+  }, []);
+
+  const setCurrentVideoUrl = useCallback((url?: string) => {
+    dispatch({ type: 'SET_CURRENT_VIDEO_URL', payload: url });
   }, []);
 
   const setStitchedAudioUrl = useCallback((url?: string) => {
@@ -497,6 +511,7 @@ export const PlaylistProvider: React.FC<PlaylistProviderProps> = ({ children }) 
     currentStep: state.currentStep,
     stepCompletion: state.stepCompletion,
     stepData: state.stepData,
+    currentVideoUrl: state.currentVideoUrl,
     stitchedAudioUrl: state.stitchedAudioUrl,
     isGenerating: state.isGenerating,
     isEditMode: state.isEditMode,
@@ -514,6 +529,7 @@ export const PlaylistProvider: React.FC<PlaylistProviderProps> = ({ children }) 
     setCurrentStep,
     markStepCompleted,
     setEditMode,
+    setCurrentVideoUrl,
     setStitchedAudioUrl,
     setIsGenerating,
     updateProcessingState,

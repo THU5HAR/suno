@@ -44,6 +44,7 @@ export interface CanvasObject {
   strokeWidth?: number;
   rx?: number;
   ry?: number;
+  src?: string; // For image objects
 }
 
 export interface CanvasData {
@@ -67,6 +68,7 @@ export interface ProjectState {
   currentStep: number;
   stepCompletion: Record<number, boolean>;
   stepData: Record<number, StepData>;
+  currentVideoUrl?: string;
   stitchedAudioUrl?: string;
   isGenerating: boolean;
   isEditMode: boolean;
@@ -91,4 +93,12 @@ export interface AudioBuffer {
   name: string;
   data: ArrayBuffer;
   originalName: string;
+}
+
+export interface VideoGenerationOptions {
+  width: number;
+  height: number;
+  duration: number;
+  includeAudio: boolean;
+  sidebarWidth: number;
 }

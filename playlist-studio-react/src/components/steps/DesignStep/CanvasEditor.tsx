@@ -26,6 +26,7 @@ export interface CanvasEditorRef {
   addRectangle: () => void;
   addCircle: () => void;
   addText: () => void;
+  addImage: (url: string | File, options?: { left?: number; top?: number; width?: number; height?: number }) => Promise<void>;
   clearCanvas: () => void;
   loadCanvasData: (data: CanvasData) => void;
   exportCanvasData: () => CanvasData;
@@ -47,16 +48,18 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(({
   const loadCanvasDataRef = useRef<((data: CanvasData) => void) | null>(null);
   const exportCanvasDataRef = useRef<(() => CanvasData) | null>(null);
   
-  // Keep refs in sync
+  // Keep refs in sync (but don't reload canvas when stepData changes - that causes flicker)
+  // We only load canvas data on initial mount, not on every save
   useEffect(() => {
     stepDataRef.current = stepData;
+    // Intentionally NOT reloading canvas here - saves happen without needing to reload
   }, [stepData]);
 
   useEffect(() => {
     saveCanvasDataRef.current = saveCanvasData;
   }, [saveCanvasData]);
 
-  const loadCanvasData = useCallback((data: CanvasData) => {
+  const loadCanvasData = useCallback((data: CanvasData, skipClear: boolean = false) => {
     if (!fabricCanvasRef.current) return;
 
     initFabric().then((fabricLib) => {
@@ -73,10 +76,19 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(({
       
       const canvas = fabricCanvasRef.current!;
       
-    canvas.clear();
-      canvas.setBackgroundColor(data.backgroundColor || '#ffffff', () => {
-        canvas.renderAll();
-      });
+      // Only clear if we're not skipping (prevents flicker during updates)
+      if (!skipClear) {
+        canvas.clear();
+      }
+      
+      // Only update background if it's different to prevent unnecessary renders
+      const currentBg = (canvas.backgroundColor as string) || '#ffffff';
+      const newBg = data.backgroundColor || '#ffffff';
+      if (currentBg !== newBg) {
+        canvas.setBackgroundColor(newBg, () => {
+          canvas.renderAll();
+        });
+      }
 
     // Load objects
     data.objects.forEach(objData => {
@@ -111,7 +123,24 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(({
           });
           break;
         case 'image':
-          // Handle image loading separately
+          // Handle image loading separately - will be loaded in loadCanvasData
+          if (objData.src) {
+            // Image will be loaded async
+            fabric.Image.fromURL(objData.src, (img: any) => {
+              if (img) {
+                img.set({
+                  left: objData.left || 0,
+                  top: objData.top || 0,
+                  scaleX: objData.scaleX || 1,
+                  scaleY: objData.scaleY || 1,
+                });
+                if (objData.width) img.scaleToWidth(objData.width);
+                if (objData.height) img.scaleToHeight(objData.height);
+                canvas.add(img);
+                // Don't call renderAll() - Fabric.js auto-renders on add
+              }
+            }, { crossOrigin: 'anonymous' });
+          }
           break;
       }
 
@@ -119,9 +148,11 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(({
         if (objData.scaleX) fabricObject.scaleX = objData.scaleX;
         if (objData.scaleY) fabricObject.scaleY = objData.scaleY;
         canvas.add(fabricObject);
+        // Don't call renderAll() here - Fabric.js auto-renders on add
       }
     });
 
+    // Single render at the end instead of multiple
     canvas.renderAll();
     });
   }, []);
@@ -140,25 +171,73 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(({
     }
 
     const canvas = fabricCanvasRef.current;
-    const objects = canvas.getObjects().map((obj: FabricObject) => ({
-      type: obj.type || 'unknown',
-      left: obj.left || 0,
-      top: obj.top || 0,
-      width: obj.width,
-      height: obj.height,
-      scaleX: obj.scaleX,
-      scaleY: obj.scaleY,
-      fill: (obj as any).fill,
-      text: (obj as any).text,
-      fontSize: (obj as any).fontSize,
-      fontFamily: (obj as any).fontFamily,
-      angle: obj.angle,
-      opacity: obj.opacity,
-      stroke: (obj as any).stroke,
-      strokeWidth: (obj as any).strokeWidth,
-      rx: (obj as any).rx,
-      ry: (obj as any).ry,
-    }));
+    const objects = canvas.getObjects().map((obj: FabricObject) => {
+      const baseObj: any = {
+        type: obj.type || 'unknown',
+        left: obj.left || 0,
+        top: obj.top || 0,
+        width: obj.width,
+        height: obj.height,
+        scaleX: obj.scaleX,
+        scaleY: obj.scaleY,
+        angle: obj.angle,
+        opacity: obj.opacity,
+        stroke: (obj as any).stroke,
+        strokeWidth: (obj as any).strokeWidth,
+        rx: (obj as any).rx,
+        ry: (obj as any).ry,
+      };
+
+      // Handle text objects
+      if (obj.type === 'textbox' || obj.type === 'i-text' || obj.type === 'text') {
+        baseObj.text = (obj as any).text;
+        baseObj.fontSize = (obj as any).fontSize;
+        baseObj.fontFamily = (obj as any).fontFamily;
+        baseObj.fill = (obj as any).fill;
+      } else if (obj.type === 'image') {
+        // For images, try multiple methods to get the source
+        // Fabric.js images can have the source in different places depending on version
+        const fabricImage = obj as any;
+        let imageSrc: string | undefined;
+        
+        // Try getElement() method (Fabric.js v5+)
+        if (fabricImage.getElement) {
+          const imgElement = fabricImage.getElement();
+          if (imgElement && imgElement.src) {
+            imageSrc = imgElement.src;
+          }
+        }
+        
+        // Try getSrc() method (older Fabric.js versions)
+        if (!imageSrc && fabricImage.getSrc) {
+          imageSrc = fabricImage.getSrc();
+        }
+        
+        // Try direct src property
+        if (!imageSrc && fabricImage.src) {
+          imageSrc = fabricImage.src;
+        }
+        
+        // Try _element.src (internal property)
+        if (!imageSrc && fabricImage._element && fabricImage._element.src) {
+          imageSrc = fabricImage._element.src;
+        }
+        
+        // Convert to data URL if it's a blob URL and we need persistence
+        if (imageSrc && imageSrc.startsWith('blob:')) {
+          // For blob URLs, we might need to convert to data URL for persistence
+          // But for now, keep the blob URL - it should work as long as the blob exists
+          baseObj.src = imageSrc;
+        } else if (imageSrc) {
+          baseObj.src = imageSrc;
+        }
+      } else {
+        // For shapes
+        baseObj.fill = (obj as any).fill;
+      }
+
+      return baseObj;
+    });
 
     return {
       backgroundColor: (canvas.backgroundColor as string) || '#ffffff',
@@ -221,19 +300,30 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(({
       fabricCanvasRef.current = canvas;
       setIsInitialized(true);
 
-      // Load existing canvas data if available
+      // Load existing canvas data if available (only on initial load)
       const currentStepData = stepDataRef.current[currentStep];
       if (currentStepData?.canvasData && loadCanvasDataRef.current) {
-        loadCanvasDataRef.current(currentStepData.canvasData);
+        // Don't skip clear on initial load - we want a fresh canvas
+        loadCanvasDataRef.current(currentStepData.canvasData, false);
       }
 
+      // Track if user is currently dragging/modifying to prevent saves during interaction
+      let isDragging = false;
+      let isModifying = false;
+      
       // Debounced save to prevent too many updates - only save on final actions
       const debouncedSave = () => {
+        // Don't save if user is actively dragging or modifying
+        if (isDragging || isModifying) {
+          return;
+        }
+        
         if (saveTimeout) {
           clearTimeout(saveTimeout);
         }
         saveTimeout = setTimeout(() => {
-          if (isMounted && fabricCanvasRef.current && exportCanvasDataRef.current) {
+          // Double-check we're not in the middle of an interaction
+          if (!isDragging && !isModifying && isMounted && fabricCanvasRef.current && exportCanvasDataRef.current) {
             try {
               const canvasData = exportCanvasDataRef.current();
               saveCanvasDataRef.current(canvasData);
@@ -241,22 +331,55 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(({
               console.error('Error saving canvas data:', error);
             }
           }
-        }, 1000); // Increased debounce to prevent flicker
+        }, 1500); // Increased debounce to prevent flicker
       };
 
-      // Only listen to final events, not intermediate dragging
-      canvas.on('object:added', debouncedSave);
-      canvas.on('object:removed', debouncedSave);
-      canvas.on('object:modified', debouncedSave);
+      // Track dragging state
+      canvas.on('mouse:down', () => {
+        isDragging = true;
+      });
       
-      // Save on mouse up to capture final position after moving/scaling (this is the key)
+      canvas.on('object:moving', () => {
+        isDragging = true;
+      });
+      
+      canvas.on('object:scaling', () => {
+        isModifying = true;
+      });
+      
+      canvas.on('object:rotating', () => {
+        isModifying = true;
+      });
+
+      // Save on mouse up - this is the key moment to save
       const handleMouseUp = () => {
-        debouncedSave();
+        isDragging = false;
+        isModifying = false;
+        // Small delay to ensure all transformations are complete
+        setTimeout(() => {
+          debouncedSave();
+        }, 100);
       };
       canvas.on('mouse:up', handleMouseUp);
       
-      // Store the handler for cleanup
+      // Also save when object modification ends
+      canvas.on('object:modified', () => {
+        isDragging = false;
+        isModifying = false;
+        // Small delay to ensure modifications are complete
+        setTimeout(() => {
+          debouncedSave();
+        }, 100);
+      });
+      
+      // Save on object add/remove (these don't cause dragging)
+      canvas.on('object:added', debouncedSave);
+      canvas.on('object:removed', debouncedSave);
+      
+      // Store the handlers for cleanup
       (canvas as any)._handleMouseUp = handleMouseUp;
+      (canvas as any)._isDragging = isDragging;
+      (canvas as any)._isModifying = isModifying;
     }).catch((error) => {
       console.error('Failed to load Fabric.js:', error);
     });
@@ -273,6 +396,11 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(({
           canvas.off('object:added');
           canvas.off('object:removed');
           canvas.off('object:modified');
+          canvas.off('mouse:down');
+          canvas.off('mouse:up');
+          canvas.off('object:moving');
+          canvas.off('object:scaling');
+          canvas.off('object:rotating');
           if ((canvas as any)._handleMouseUp) {
             canvas.off('mouse:up', (canvas as any)._handleMouseUp);
           }
@@ -320,7 +448,7 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(({
     });
 
       fabricCanvasRef.current!.add(rect);
-      fabricCanvasRef.current!.renderAll();
+      // renderAll() not needed - Fabric.js auto-renders
     });
   }, []);
 
@@ -342,7 +470,7 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(({
     });
 
       fabricCanvasRef.current!.add(circle);
-      fabricCanvasRef.current!.renderAll();
+      // renderAll() not needed - Fabric.js auto-renders
     });
   }, []);
 
@@ -366,16 +494,75 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(({
       });
 
       fabricCanvasRef.current!.add(text);
-      fabricCanvasRef.current!.renderAll();
+      // renderAll() not needed - Fabric.js auto-renders
     });
   }, []);
 
+  const addImage = useCallback(async (urlOrFile: string | File, options?: { left?: number; top?: number; width?: number; height?: number }) => {
+    if (!fabricCanvasRef.current) return;
+
+    try {
+      let imageUrl: string;
+      
+      if (urlOrFile instanceof File) {
+        imageUrl = URL.createObjectURL(urlOrFile);
+      } else {
+        imageUrl = urlOrFile;
+      }
+
+      initFabric().then((fabricLib) => {
+        if (!fabricLib || !fabricCanvasRef.current) return;
+        
+        const Image = fabricLib.Image;
+        if (!Image) {
+          console.error('Image class not found in Fabric.js');
+          return;
+        }
+
+        Image.fromURL(imageUrl, (img: any) => {
+          if (!img || !fabricCanvasRef.current) return;
+
+          const canvas = fabricCanvasRef.current;
+          const canvasWidth = canvas.width || 1280;
+          const canvasHeight = canvas.height || 720;
+
+          // Set position
+          const left = options?.left ?? canvasWidth / 2;
+          const top = options?.top ?? canvasHeight / 2;
+
+          img.set({
+            left: left - (options?.width ? options.width / 2 : img.width! / 2),
+            top: top - (options?.height ? options.height / 2 : img.height! / 2),
+          });
+
+          // Scale if dimensions provided
+          if (options?.width) {
+            img.scaleToWidth(options.width);
+          } else if (options?.height) {
+            img.scaleToHeight(options.height);
+          }
+
+          canvas.add(img);
+          // renderAll() not needed - Fabric.js auto-renders
+
+          // Cleanup object URL if it was created from a file
+          if (urlOrFile instanceof File) {
+            // Don't revoke immediately, keep for canvas rendering
+            // URL will be cleaned up when component unmounts or new image is added
+          }
+        }, { crossOrigin: 'anonymous' });
+      });
+    } catch (error) {
+      console.error('Failed to add image to canvas:', error);
+    }
+  }, []);
 
   // Expose methods for parent components via ref
   useImperativeHandle(ref, () => ({
     addRectangle,
     addCircle,
     addText,
+    addImage,
     clearCanvas,
     loadCanvasData,
     exportCanvasData,
