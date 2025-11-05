@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { usePlaylist } from '@/context/PlaylistContext';
 import { SongLibrary } from '@/components/steps/AudioStep/SongLibrary';
 import { Timeline } from '@/components/steps/AudioStep/Timeline';
@@ -7,12 +7,8 @@ import { useNotifications } from '@/context/NotificationContext';
 import { StitchPanel } from '@/components/steps/ReviewStep/StitchPanel';
 import { ExportPanel } from '@/components/steps/ReviewStep/ExportPanel';
 import { ProjectSummary } from '@/components/steps/ReviewStep/ProjectSummary';
+import { VideoEditor, VideoEditorRef } from '@/components/steps/VideoStep/VideoEditor';
 import { Button } from '@/components/ui/Button';
-import { CanvasEditor } from '@/components/steps/DesignStep';
-import { ElementsPanel } from '@/components/steps/DesignStep/ElementsPanel';
-import { PropertiesPanel } from '@/components/steps/DesignStep/PropertiesPanel';
-import { useCanvas } from '@/context/CanvasContext';
-import { CANVAS_CONFIG } from '@/utils/constants';
 
 const StitchedAudioPreview: React.FC = () => {
   const { stitchedAudioUrl, downloadStitchedAudio } = usePlaylist();
@@ -37,8 +33,17 @@ const StitchedAudioPreview: React.FC = () => {
 const MainContent: React.FC = () => {
   const { currentStep, addSong } = usePlaylist();
   const { showNotification } = useNotifications();
-  const { canvasEditorRef } = useCanvas();
   const [isProcessingFile, setIsProcessingFile] = useState(false);
+  const videoEditorRef = useRef<VideoEditorRef>(null);
+  
+  // Expose videoEditorRef to window for sidebar access (temporary solution)
+  // In a real app, you'd use a context or state management
+  useEffect(() => {
+    (window as any).videoEditorRef = videoEditorRef;
+    return () => {
+      delete (window as any).videoEditorRef;
+    };
+  }, []);
 
   const renderStepContent = () => {
     switch (currentStep) {
@@ -111,10 +116,6 @@ const MainContent: React.FC = () => {
                 />
               </div>
 
-              <div className="flex justify-center gap-4">
-                {/* These buttons are now handled by SongLibrary component's "Add Song" button */}
-              </div>
-
               {/* Song Library Component */}
               <div className="bg-white rounded-lg border border-gray-200 p-6">
                 <SongLibrary />
@@ -130,20 +131,17 @@ const MainContent: React.FC = () => {
 
       case 2:
         return (
-          <div className="flex h-full bg-gray-50">
-            {/* Left Sidebar - Elements & Assets (Canva-style) */}
-            <ElementsPanel />
-            
-            {/* Main Canvas Area - Centered (Canva-style) */}
-            <CanvasEditor
-              ref={canvasEditorRef as React.RefObject<any>}
-              width={CANVAS_CONFIG.width}
-              height={CANVAS_CONFIG.height}
-              className="flex-1"
-            />
-            
-            {/* Right Sidebar - Properties Panel (Canva-style) */}
-            <PropertiesPanel />
+          <div className="p-6">
+            <div className="text-center mb-8">
+              <h2 className="text-3xl font-semibold text-gray-900 mb-2">
+                Video Design & Thumbnail
+              </h2>
+              <p className="text-gray-600">
+                Design your video thumbnail and customize the visual appearance
+              </p>
+            </div>
+
+            <VideoEditor ref={videoEditorRef} />
           </div>
         );
 
@@ -200,7 +198,7 @@ const MainContent: React.FC = () => {
   };
 
   return (
-    <div className="flex-1 bg-gray-50 overflow-hidden">
+    <div className="flex-1 bg-gray-50 overflow-y-auto">
       {renderStepContent()}
     </div>
   );

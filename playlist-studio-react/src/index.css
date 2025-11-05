@@ -86,20 +86,6 @@
   animation: fadeOut 0.2s ease-in;
 }
 
-/* Canvas specific styles */
-.canvas-container {
-  position: relative;
-  background: #000;
-  border-radius: 8px;
-  overflow: hidden;
-}
-
-.canvas-container canvas {
-  display: block;
-  max-width: 100%;
-  height: auto;
-}
-
 /* Modal backdrop blur */
 .modal-backdrop {
   backdrop-filter: blur(4px);
@@ -545,26 +531,6 @@
 .timeline-btn:hover {
   border-color: #7c3aed;
   background: #f9fafb;
-}
-
-/* Canvas section */
-.canvas-section {
-  background: white;
-  border-radius: 12px;
-  border: 1px solid #e5e7eb;
-  overflow: hidden;
-}
-
-.thumbnail-editor {
-  padding: 24px;
-}
-
-.thumbnail-canvas-container {
-  display: flex;
-  justify-content: center;
-  padding: 24px;
-  background: #f9fafb;
-  border-radius: 8px;
 }
 
 /* Property group */

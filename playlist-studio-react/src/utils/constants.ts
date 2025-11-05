@@ -1,29 +1,15 @@
 export const STEPS = {
   AUDIO: 1,
-  DESIGN: 2,
-  REVIEW: 3,
+  VIDEO: 2,
+  STITCH: 3,
   EXPORT: 4
 } as const;
 
 export const STEP_LABELS = {
   [STEPS.AUDIO]: 'Audio Editing',
-  [STEPS.DESIGN]: 'Video Design',
-  [STEPS.REVIEW]: 'Review & Export',
-  [STEPS.EXPORT]: 'Final Export'
-} as const;
-
-export const CANVAS_CONFIG = {
-  width: 1280,
-  height: 720,
-  backgroundColor: '#000000'
-} as const;
-
-export const VIDEO_CONFIG = {
-  width: 1280,
-  height: 720,
-  sidebarWidth: 300,
-  frameRate: 30,
-  audioBitrate: '128k'
+  [STEPS.VIDEO]: 'Video Design',
+  [STEPS.STITCH]: 'Stitch Audio',
+  [STEPS.EXPORT]: 'Review & Export'
 } as const;
 
 export const AUDIO_CONFIG = {

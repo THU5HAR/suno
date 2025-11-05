@@ -1,17 +1,17 @@
 import React from 'react';
 import { usePlaylist } from '@/context/PlaylistContext';
 import { useNotifications } from '@/context/NotificationContext';
-import { useCanvas } from '@/context/CanvasContext';
-import { AssetLibrary } from '@/components/steps/DesignStep/AssetLibrary';
 import { FeedbackSidebar } from '@/components/steps/AudioStep/FeedbackSidebar';
+import { DesignTools } from '@/components/steps/VideoStep/DesignTools';
 import { Button } from '@/components/ui/Button';
-import { Asset } from '@/types';
 import { calculateTotalDuration, formatDuration } from '@/utils/helpers';
 
 const Sidebar: React.FC = () => {
   const { currentStep, playlist, clearAll, setCurrentStep } = usePlaylist();
   const { showNotification } = useNotifications();
-  const { canvasEditorRef } = useCanvas();
+  
+  // Get video editor ref from window (temporary solution - ideally use context)
+  const getVideoEditorRef = () => (window as any).videoEditorRef?.current;
 
   const renderStepContent = () => {
     switch (currentStep) {
@@ -81,84 +81,49 @@ const Sidebar: React.FC = () => {
       case 2:
         return (
           <div className="space-y-6">
+            <DesignTools
+              onAddText={() => getVideoEditorRef()?.addText()}
+              onAddImage={() => {
+                const imageUrl = prompt('Enter image URL:');
+                if (imageUrl) {
+                  getVideoEditorRef()?.addImage(imageUrl);
+                }
+              }}
+              onClearCanvas={() => getVideoEditorRef()?.clearCanvas()}
+            />
+
             <div>
               <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-4">
-                Design Tools
+                Project Summary
               </div>
-              <div className="grid grid-cols-1 gap-2">
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  className="w-full"
-                  onClick={() => {
-                    if (canvasEditorRef.current?.addRectangle) {
-                      canvasEditorRef.current.addRectangle();
-                    }
-                  }}
-                >
-                  ⬜ Rectangle
-                </Button>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  className="w-full"
-                  onClick={() => {
-                    if (canvasEditorRef.current?.addCircle) {
-                      canvasEditorRef.current.addCircle();
-                    }
-                  }}
-                >
-                  ⭕ Circle
-                </Button>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  className="w-full"
-                  onClick={() => {
-                    if (canvasEditorRef.current?.addText) {
-                      canvasEditorRef.current.addText();
-                    }
-                  }}
-                >
-                  📝 Text
-                </Button>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  className="w-full"
-                  onClick={() => {
-                    if (canvasEditorRef.current?.clearCanvas) {
-                      canvasEditorRef.current.clearCanvas();
-                      showNotification('Canvas cleared', 'success');
-                    }
-                  }}
-                >
-                  🗑️ Clear Canvas
-                </Button>
+              <div className="bg-gray-50 rounded-lg p-4">
+                <div className="space-y-3">
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-gray-600">Songs:</span>
+                    <span className="font-semibold">{playlist.length}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-gray-600">Duration:</span>
+                    <span className="font-semibold">{formatDuration(calculateTotalDuration(playlist))}</span>
+                  </div>
+                </div>
               </div>
             </div>
 
             <div>
               <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-4">
-                Asset Library
+                Quick Actions
               </div>
-              <AssetLibrary
-                onAssetSelect={async (asset: Asset) => {
-                  if (asset.type === 'image') {
-                    try {
-                      if (canvasEditorRef.current?.addImage) {
-                        await canvasEditorRef.current.addImage(asset.url);
-                        showNotification(`Added ${asset.name} to canvas`, 'success');
-                      }
-                    } catch (error) {
-                      console.error('Failed to add image to canvas:', error);
-                      showNotification('Failed to add image to canvas', 'error');
-                    }
-                  } else {
-                    showNotification(`Asset type "${asset.type}" not yet supported for canvas`, 'info');
-                  }
+              <Button
+                variant="secondary"
+                className="w-full mb-2"
+                onClick={() => {
+                  setCurrentStep(1);
+                  showNotification('Switched to Audio step', 'info');
                 }}
-              />
+              >
+                🎵 Edit Audio
+              </Button>
             </div>
           </div>
         );
@@ -179,10 +144,6 @@ const Sidebar: React.FC = () => {
                   <div className="flex justify-between items-center">
                     <span className="text-sm text-gray-600">Duration:</span>
                     <span className="font-semibold">{formatDuration(calculateTotalDuration(playlist))}</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm text-gray-600">Feedback:</span>
-                    <span className="font-semibold">0</span>
                   </div>
                 </div>
               </div>
@@ -207,10 +168,10 @@ const Sidebar: React.FC = () => {
                 className="w-full"
                 onClick={() => {
                   setCurrentStep(2);
-                  showNotification('Switched to Design step', 'info');
+                  showNotification('Switched to Stitch step', 'info');
                 }}
               >
-                🎨 Edit Design
+                🎼 Edit Stitch
               </Button>
             </div>
           </div>

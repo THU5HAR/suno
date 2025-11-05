@@ -1,7 +1,9 @@
-import React, { createContext, useContext, useReducer, useCallback, ReactNode } from 'react';
-import { Song, Feedback, Asset, ProjectState, StepData, CanvasData, ProcessingState } from '@/types';
+import React, { createContext, useContext, useReducer, useCallback, ReactNode, useState, useEffect, useRef } from 'react';
+import { Song, Feedback, Asset, ProjectState, StepData, ProcessingState } from '@/types';
 import { generateId } from '@/utils/helpers';
 import { audioService } from '@/services/audioService';
+import { apiClient } from '@/services/apiClient';
+import { useAuth } from './AuthContext';
 
 interface PlaylistContextType {
   // State
@@ -11,7 +13,6 @@ interface PlaylistContextType {
   currentStep: number;
   stepCompletion: Record<number, boolean>;
   stepData: Record<number, StepData>;
-  currentVideoUrl?: string;
   stitchedAudioUrl?: string;
   isGenerating: boolean;
   isEditMode: boolean;
@@ -33,13 +34,11 @@ interface PlaylistContextType {
   markStepCompleted: (step: number) => void;
   setEditMode: (isEdit: boolean) => void;
 
-  setCurrentVideoUrl: (url?: string) => void;
   setStitchedAudioUrl: (url?: string) => void;
   setIsGenerating: (generating: boolean) => void;
 
   updateProcessingState: (state: Partial<ProcessingState>) => void;
 
-  saveCanvasData: (canvasData: CanvasData) => void;
   loadProjectData: () => void;
   saveProjectData: () => void;
   clearAll: () => void;
@@ -70,11 +69,9 @@ type PlaylistAction =
   | { type: 'MARK_STEP_COMPLETED'; payload: number }
   | { type: 'SET_STEP_COMPLETION'; payload: Record<number, boolean> }
   | { type: 'SET_EDIT_MODE'; payload: boolean }
-  | { type: 'SET_CURRENT_VIDEO_URL'; payload: string | undefined }
   | { type: 'SET_STITCHED_AUDIO_URL'; payload: string | undefined }
   | { type: 'SET_IS_GENERATING'; payload: boolean }
   | { type: 'UPDATE_PROCESSING_STATE'; payload: Partial<ProcessingState> }
-  | { type: 'SAVE_CANVAS_DATA'; payload: CanvasData }
   | { type: 'LOAD_PROJECT_DATA'; payload: Partial<ProjectState> }
   | { type: 'CLEAR_ALL' };
 
@@ -85,7 +82,6 @@ const initialState: ProjectState = {
   currentStep: 1,
   stepCompletion: { 1: false, 2: false, 3: false, 4: false },
   stepData: {},
-  currentVideoUrl: undefined,
   stitchedAudioUrl: undefined,
   isGenerating: false,
   isEditMode: false,
@@ -200,12 +196,6 @@ function playlistReducer(state: ProjectState, action: PlaylistAction): ProjectSt
         isEditMode: action.payload,
       };
 
-    case 'SET_CURRENT_VIDEO_URL':
-      return {
-        ...state,
-        currentVideoUrl: action.payload,
-      };
-
     case 'SET_STITCHED_AUDIO_URL':
       return {
         ...state,
@@ -224,19 +214,6 @@ function playlistReducer(state: ProjectState, action: PlaylistAction): ProjectSt
         processingState: {
           ...state.processingState,
           ...action.payload,
-        },
-      };
-
-    case 'SAVE_CANVAS_DATA':
-      return {
-        ...state,
-        stepData: {
-          ...state.stepData,
-          [state.currentStep]: {
-            ...state.stepData[state.currentStep],
-            canvasData: action.payload,
-            timestamp: new Date().toISOString(),
-          } as StepData,
         },
       };
 
@@ -262,6 +239,10 @@ interface PlaylistProviderProps {
 
 export const PlaylistProvider: React.FC<PlaylistProviderProps> = ({ children }) => {
   const [state, dispatch] = useReducer(playlistReducer, initialState);
+  const { isAuthenticated } = useAuth();
+  const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
+  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const lastSavedStateRef = useRef<string>('');
 
   // Actions
   const addSong = useCallback((songData: Omit<Song, 'id'>) => {
@@ -320,10 +301,6 @@ export const PlaylistProvider: React.FC<PlaylistProviderProps> = ({ children }) 
     dispatch({ type: 'SET_EDIT_MODE', payload: isEdit });
   }, []);
 
-  const setCurrentVideoUrl = useCallback((url?: string) => {
-    dispatch({ type: 'SET_CURRENT_VIDEO_URL', payload: url });
-  }, []);
-
   const setStitchedAudioUrl = useCallback((url?: string) => {
     dispatch({ type: 'SET_STITCHED_AUDIO_URL', payload: url });
   }, []);
@@ -336,12 +313,28 @@ export const PlaylistProvider: React.FC<PlaylistProviderProps> = ({ children }) 
     dispatch({ type: 'UPDATE_PROCESSING_STATE', payload: processingState });
   }, []);
 
-  const saveCanvasData = useCallback((canvasData: CanvasData) => {
-    dispatch({ type: 'SAVE_CANVAS_DATA', payload: canvasData });
-  }, []);
-
-  const loadProjectData = useCallback(() => {
+  const loadProjectData = useCallback(async () => {
     try {
+      if (isAuthenticated) {
+        // Try to load from backend
+        try {
+          const projects = await apiClient.getProjects();
+          if (projects && projects.length > 0) {
+            // Load the most recent project
+            const latestProject = projects[0];
+            const projectDetails = await apiClient.getProject(latestProject.id);
+            if (projectDetails && projectDetails.data) {
+              setCurrentProjectId(latestProject.id);
+              dispatch({ type: 'LOAD_PROJECT_DATA', payload: projectDetails.data });
+              return;
+            }
+          }
+        } catch (apiError) {
+          console.warn('Failed to load from backend, falling back to localStorage:', apiError);
+        }
+      }
+      
+      // Fallback to localStorage
       const saved = localStorage.getItem('playlistStudioProject');
       if (saved) {
         const projectData = JSON.parse(saved);
@@ -350,19 +343,68 @@ export const PlaylistProvider: React.FC<PlaylistProviderProps> = ({ children }) 
     } catch (error) {
       console.warn('Failed to load project data:', error);
     }
-  }, []);
+  }, [isAuthenticated]);
 
-  const saveProjectData = useCallback(() => {
+  const saveProjectData = useCallback(async () => {
     try {
       const projectData = {
         ...state,
         lastSaved: new Date().toISOString(),
       };
-      localStorage.setItem('playlistStudioProject', JSON.stringify(projectData));
+      
+      // Check if state actually changed
+      const currentStateString = JSON.stringify(projectData);
+      if (currentStateString === lastSavedStateRef.current) {
+        return; // No changes, skip save
+      }
+
+      if (isAuthenticated) {
+        // Save to backend
+        try {
+          const projectName = `Playlist Project ${new Date().toLocaleDateString()}`;
+          
+          if (currentProjectId) {
+            // Update existing project
+            await apiClient.updateProject(currentProjectId, undefined, projectData);
+          } else {
+            // Create new project
+            const newProject = await apiClient.createProject(projectName, projectData);
+            setCurrentProjectId(newProject.id);
+          }
+          lastSavedStateRef.current = currentStateString;
+          console.log('Project saved to backend');
+        } catch (apiError) {
+          console.warn('Failed to save to backend, falling back to localStorage:', apiError);
+          // Fallback to localStorage
+          localStorage.setItem('playlistStudioProject', JSON.stringify(projectData));
+        }
+      } else {
+        // Save to localStorage
+        localStorage.setItem('playlistStudioProject', JSON.stringify(projectData));
+      }
+      
+      lastSavedStateRef.current = currentStateString;
     } catch (error) {
       console.warn('Failed to save project data:', error);
     }
-  }, [state]);
+  }, [state, isAuthenticated, currentProjectId]);
+
+  // Auto-save when state changes (debounced)
+  useEffect(() => {
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+
+    saveTimeoutRef.current = setTimeout(() => {
+      saveProjectData();
+    }, 2000); // Auto-save after 2 seconds of inactivity
+
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+    };
+  }, [state, saveProjectData]);
 
   const clearAll = useCallback(() => {
     dispatch({ type: 'CLEAR_ALL' });
@@ -511,7 +553,6 @@ export const PlaylistProvider: React.FC<PlaylistProviderProps> = ({ children }) 
     currentStep: state.currentStep,
     stepCompletion: state.stepCompletion,
     stepData: state.stepData,
-    currentVideoUrl: state.currentVideoUrl,
     stitchedAudioUrl: state.stitchedAudioUrl,
     isGenerating: state.isGenerating,
     isEditMode: state.isEditMode,
@@ -529,11 +570,9 @@ export const PlaylistProvider: React.FC<PlaylistProviderProps> = ({ children }) 
     setCurrentStep,
     markStepCompleted,
     setEditMode,
-    setCurrentVideoUrl,
     setStitchedAudioUrl,
     setIsGenerating,
     updateProcessingState,
-    saveCanvasData,
     loadProjectData,
     saveProjectData,
     clearAll,

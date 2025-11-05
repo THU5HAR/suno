@@ -24,7 +24,7 @@ const TopToolbar: React.FC = () => {
         </div>
         <div>
           <div className="font-semibold text-gray-900">Playlist Studio</div>
-          <div className="text-xs text-gray-500">Professional Music Video Creator</div>
+          <div className="text-xs text-gray-500">Professional Music Playlist Creator</div>
         </div>
       </div>
 

@@ -26,37 +26,10 @@ export interface Asset {
   file?: File;
 }
 
-export interface CanvasObject {
-  type: string;
-  left: number;
-  top: number;
-  width?: number;
-  height?: number;
-  scaleX?: number;
-  scaleY?: number;
-  fill?: string;
-  text?: string;
-  fontSize?: number;
-  fontFamily?: string;
-  angle?: number;
-  opacity?: number;
-  stroke?: string;
-  strokeWidth?: number;
-  rx?: number;
-  ry?: number;
-  src?: string; // For image objects
-}
-
-export interface CanvasData {
-  backgroundColor: string;
-  objects: CanvasObject[];
-}
-
 export interface StepData {
   playlist: Song[];
   feedback: Feedback[];
   assets: Asset[];
-  canvasData?: CanvasData;
   timestamp: string;
   stepNumber: number;
 }
@@ -93,12 +66,4 @@ export interface AudioBuffer {
   name: string;
   data: ArrayBuffer;
   originalName: string;
-}
-
-export interface VideoGenerationOptions {
-  width: number;
-  height: number;
-  duration: number;
-  includeAudio: boolean;
-  sidebarWidth: number;
 }

@@ -13,7 +13,8 @@ class GoogleDriveService {
 
     // Note: apiKey is part of the config interface but not currently used
     // Can be accessed via config?.apiKey if needed in the future
-    this.clientId = config?.clientId || process.env.VITE_GOOGLE_DRIVE_CLIENT_ID;
+    // Use import.meta.env for Vite (not process.env which is Node.js only)
+    this.clientId = config?.clientId || import.meta.env.VITE_GOOGLE_DRIVE_CLIENT_ID;
 
     // Load Google Drive API
     if (typeof window !== 'undefined' && !(window as any).gapi) {
