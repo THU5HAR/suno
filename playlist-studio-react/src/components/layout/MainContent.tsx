@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { usePlaylist } from '@/context/PlaylistContext';
 import { SongLibrary } from '@/components/steps/AudioStep/SongLibrary';
-import { Timeline } from '@/components/steps/AudioStep/Timeline';
 import { parseCSV, parseExcel } from '@/utils/helpers';
 import { useNotifications } from '@/context/NotificationContext';
 import { StitchPanel } from '@/components/steps/ReviewStep/StitchPanel';
@@ -120,32 +119,11 @@ const MainContent: React.FC = () => {
               <div className="bg-white rounded-lg border border-gray-200 p-6">
                 <SongLibrary />
               </div>
-
-              {/* Timeline Component - Shows all feedback markers */}
-              <div className="bg-white rounded-lg border border-gray-200 p-6">
-                <Timeline currentTime={0} playingSongId={null} />
-              </div>
             </div>
           </div>
         );
 
       case 2:
-        return (
-          <div className="p-6">
-            <div className="text-center mb-8">
-              <h2 className="text-3xl font-semibold text-gray-900 mb-2">
-                Video Design & Thumbnail
-              </h2>
-              <p className="text-gray-600">
-                Design your video thumbnail and customize the visual appearance
-              </p>
-            </div>
-
-            <VideoEditor ref={videoEditorRef} />
-          </div>
-        );
-
-      case 3:
         return (
           <div className="p-6">
             <div className="text-center mb-8">
@@ -163,6 +141,30 @@ const MainContent: React.FC = () => {
               {/* Stitched Audio Preview and Download */}
               <StitchedAudioPreview />
             </div>
+          </div>
+        );
+
+      case 3:
+        return (
+          <div className="p-6">
+            <div className="text-center mb-8">
+              <h2 className="text-3xl font-semibold text-gray-900 mb-2">
+                Video Design & Thumbnail
+              </h2>
+              <p className="text-gray-600">
+                Design your video thumbnail and customize the visual appearance
+              </p>
+            </div>
+
+            <VideoEditor 
+              ref={videoEditorRef} 
+              onThumbnailChange={(thumbnailUrl) => {
+                // Store thumbnail data for review step
+                if (typeof window !== 'undefined') {
+                  (window as any).thumbnailData = thumbnailUrl;
+                }
+              }}
+            />
           </div>
         );
 

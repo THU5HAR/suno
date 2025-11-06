@@ -52,10 +52,10 @@ export const StitchPanel: React.FC = () => {
       setDownloadStatus(status);
 
       // Show notification about download process
-      showNotification('Downloading all songs first, then stitching...', 'info');
+      showNotification('📥 Downloading songs temporarily (in memory) for stitching. Only the final stitched audio will be saved.', 'info');
 
-      await stitchPlaylist(crossfadeDuration);
-      showNotification('✅ Songs stitched successfully! Ready for thumbnail creation.', 'success');
+      await stitchPlaylist(crossfadeDuration, delayBetweenSongs);
+      showNotification('✅ Songs stitched successfully! You can download the stitched audio in the Export step.', 'success');
       
       // Mark all as completed
       playlist.forEach(song => {
@@ -78,7 +78,7 @@ export const StitchPanel: React.FC = () => {
     }
 
     try {
-      await stitchPlaylist(crossfadeDuration);
+      await stitchPlaylist(crossfadeDuration, delayBetweenSongs);
       showNotification('✅ Playlist re-stitched successfully!', 'success');
     } catch (error) {
       console.error('Re-stitching failed:', error);
@@ -114,10 +114,10 @@ export const StitchPanel: React.FC = () => {
                     <span className="text-xs text-green-600 font-medium">✓ Cached</span>
                   )}
                   {status === 'downloading' && (
-                    <span className="text-xs text-blue-600 font-medium animate-pulse">⬇ Downloading...</span>
+                    <span className="text-xs text-blue-600 font-medium animate-pulse">⬇ Loading...</span>
                   )}
                   {status === 'completed' && (
-                    <span className="text-xs text-green-600 font-medium">✓ Downloaded</span>
+                    <span className="text-xs text-green-600 font-medium">✓ Ready</span>
                   )}
                   {status === 'pending' && !audioService.isSongCached(song.id) && (
                     <span className="text-xs text-gray-500">⏳ Pending</span>
@@ -160,8 +160,7 @@ export const StitchPanel: React.FC = () => {
             value={delayBetweenSongs}
             onChange={(e) => setDelayBetweenSongs(parseFloat(e.target.value) || 0)}
             className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-            disabled
-            title="Coming soon - will add silent gap between songs"
+            title="Adds silent gap between songs in seconds"
           />
         </div>
       </div>
@@ -215,9 +214,14 @@ export const StitchPanel: React.FC = () => {
       </div>
 
       {stitchedAudioUrl && (
-        <p className="mt-3 text-sm text-gray-600 text-center">
-          Stitched audio ready for thumbnail creation and video generation
-        </p>
+        <div className="mt-3 p-3 bg-green-50 border border-green-200 rounded-lg">
+          <p className="text-sm text-green-800 text-center font-medium">
+            ✅ Stitched audio ready! Go to the Export step to download it.
+          </p>
+          <p className="text-xs text-green-700 text-center mt-1">
+            Note: Individual songs were only loaded temporarily. Only the final stitched audio is saved.
+          </p>
+        </div>
       )}
     </div>
   );

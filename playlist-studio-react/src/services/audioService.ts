@@ -38,6 +38,7 @@ export class AudioService {
   async stitchPlaylistSongs(
     songs: Song[],
     crossfadeDuration: number = 2,
+    delayBetweenSongs: number = 0,
     onProgress?: (state: ProcessingState) => void
   ): Promise<AudioBuffer> {
     if (songs.length === 0) {
@@ -119,6 +120,7 @@ export class AudioService {
       const stitchedBuffer = await audioProcessingService.stitchAudioFiles(
         audioBuffers,
         crossfadeDuration,
+        delayBetweenSongs,
         stitchProgressCallback
       );
 

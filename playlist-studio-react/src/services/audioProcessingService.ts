@@ -123,8 +123,21 @@ class AudioProcessingService {
     try {
       const inputFileName = `input_${Date.now()}.${this.getFileExtension(audioBuffer.name)}`;
       
-      // Write input file
-      await this.ffmpeg.writeFile(inputFileName, new Uint8Array(audioBuffer.data));
+      // Write input file - always create a copy to avoid detached ArrayBuffer issues
+      const bufferData = audioBuffer.data;
+      // Create a copy of the buffer to ensure it's not detached
+      let bufferCopy: ArrayBuffer;
+      
+      if (bufferData instanceof ArrayBuffer) {
+        bufferCopy = bufferData.slice(0);
+      } else {
+        // If it's a view (Uint8Array, etc.), get the underlying buffer and copy it
+        const sourceView = new Uint8Array(bufferData);
+        bufferCopy = sourceView.buffer.slice(sourceView.byteOffset, sourceView.byteOffset + sourceView.byteLength);
+      }
+      
+      const bufferToWrite = new Uint8Array(bufferCopy);
+      await this.ffmpeg.writeFile(inputFileName, bufferToWrite);
 
       // Get audio info using FFmpeg (not ffprobe - not available in wasm version)
       // Use -f null and capture stderr for duration info, then parse it
@@ -188,6 +201,7 @@ class AudioProcessingService {
   async stitchAudioFiles(
     audioBuffers: AudioBuffer[],
     _crossfadeDuration: number = 2, // Reserved for future crossfade feature
+    delayBetweenSongs: number = 0,
     onProgress?: (progress: ProcessingState) => void
   ): Promise<AudioBuffer> {
     await this.loadFFmpeg();
@@ -215,8 +229,21 @@ class AudioProcessingService {
         const wavFileName = `temp_${i}_${Date.now()}.wav`;
 
         try {
-          // Write original file
-          await this.ffmpeg.writeFile(inputFileName, new Uint8Array(audioBuffers[i].data));
+          // Write original file - always create a copy to avoid detached ArrayBuffer issues
+          const bufferData = audioBuffers[i].data;
+          // Create a copy of the buffer to ensure it's not detached
+          let bufferCopy: ArrayBuffer;
+          
+          if (bufferData instanceof ArrayBuffer) {
+            bufferCopy = bufferData.slice(0);
+          } else {
+            // If it's a view (Uint8Array, etc.), get the underlying buffer and copy it
+            const sourceView = new Uint8Array(bufferData);
+            bufferCopy = sourceView.buffer.slice(sourceView.byteOffset, sourceView.byteOffset + sourceView.byteLength);
+          }
+          
+          const bufferToWrite = new Uint8Array(bufferCopy);
+          await this.ffmpeg.writeFile(inputFileName, bufferToWrite);
           inputFiles.push(inputFileName);
 
           // Convert to WAV with consistent format
@@ -243,7 +270,37 @@ class AudioProcessingService {
         }
       }
 
-      // Step 2: Create concat demuxer file
+      // Step 2: Create silent delay files if needed
+      const delayFiles: string[] = [];
+      if (delayBetweenSongs > 0) {
+        onProgress?.({
+          isProcessing: true,
+          progress: 45,
+          currentOperation: 'Creating delay segments...',
+        });
+
+        // Create silent audio file for delay
+        const delayFileName = `delay_${Date.now()}.wav`;
+        try {
+          // Generate silent audio: 44.1kHz, 16-bit, stereo, duration = delayBetweenSongs seconds
+          await this.ffmpeg.exec([
+            '-f', 'lavfi',
+            '-i', `anullsrc=channel_layout=stereo:sample_rate=44100`,
+            '-t', delayBetweenSongs.toString(),
+            '-acodec', 'pcm_s16le',
+            '-ar', '44100',
+            '-ac', '2',
+            '-y',
+            delayFileName
+          ]);
+          delayFiles.push(delayFileName);
+          tempFiles.push(delayFileName);
+        } catch (delayError) {
+          console.warn('Failed to create delay file, continuing without delay:', delayError);
+        }
+      }
+
+      // Step 3: Create concat demuxer file
       onProgress?.({
         isProcessing: true,
         progress: 50,
@@ -253,11 +310,21 @@ class AudioProcessingService {
       const concatFile = `concat_${Date.now()}.txt`;
       // Concat demuxer requires absolute paths, but we're using relative paths in virtual FS
       // Format: file 'path/to/file.wav'
-      const concatContent = wavFiles.map(file => `file '${file}'`).join('\n');
+      // Insert delay files between songs (but not after the last song)
+      const concatEntries: string[] = [];
+      wavFiles.forEach((file, index) => {
+        concatEntries.push(`file '${file}'`);
+        // Add delay after each song except the last one
+        if (delayBetweenSongs > 0 && index < wavFiles.length - 1 && delayFiles.length > 0) {
+          concatEntries.push(`file '${delayFiles[0]}'`);
+        }
+      });
+      
+      const concatContent = concatEntries.join('\n');
       await this.ffmpeg.writeFile(concatFile, new TextEncoder().encode(concatContent));
       tempFiles.push(concatFile);
 
-      // Step 3: Concatenate files
+      // Step 4: Concatenate files
       onProgress?.({
         isProcessing: true,
         progress: 55,

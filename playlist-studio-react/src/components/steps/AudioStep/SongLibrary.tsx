@@ -4,10 +4,12 @@ import { useNotifications } from '@/context/NotificationContext';
 import { Song } from '@/types';
 import { Button } from '@/components/ui/Button';
 import { SongInputModal } from './SongInputModal';
-import { Timeline } from './Timeline';
+import { SongTimeline } from './SongTimeline';
 import { FeedbackPopup } from './FeedbackPopup';
+import { TranscriptModal } from './TranscriptModal';
 import { googleDriveService } from '@/services/googleDriveService';
-import { validateAudioUrl, isYouTubeUrl, convertGoogleDriveUrl, extractYouTubeVideoId } from '@/utils/urlHelpers';
+import { validateAudioUrl, isYouTubeUrl, isSunoUrl, convertGoogleDriveUrl } from '@/utils/urlHelpers';
+import { audioExtractionService } from '@/services/audioExtractionService';
 
 export const SongLibrary: React.FC = () => {
   const { playlist, removeSong, reorderSongs, setCurrentStep } = usePlaylist();
@@ -15,9 +17,12 @@ export const SongLibrary: React.FC = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingSong, setEditingSong] = useState<Song | null>(null);
   const [playingSongId, setPlayingSongId] = useState<string | null>(null);
-  const [currentTime, setCurrentTime] = useState(0);
+  const [songTimes, setSongTimes] = useState<Map<string, number>>(new Map());
   const [showFeedbackPopup, setShowFeedbackPopup] = useState(false);
   const [pauseTimestamp, setPauseTimestamp] = useState<{ songIndex: number; timestamp: number } | null>(null);
+  const [showTranscriptModal, setShowTranscriptModal] = useState(false);
+  const [transcriptSong, setTranscriptSong] = useState<Song | null>(null);
+  const [extractingAudioId, setExtractingAudioId] = useState<string | null>(null);
   const audioRefs = useRef<Map<string, HTMLAudioElement>>(new Map());
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const wasPlayingRef = useRef(false);
@@ -88,7 +93,7 @@ export const SongLibrary: React.FC = () => {
     return errorMessages[code] || 'Unknown error';
   };
 
-  const handlePreview = (song: Song) => {
+  const handlePreview = async (song: Song) => {
     if (!song.url) {
       showNotification('No URL available for this song', 'warning');
       return;
@@ -102,7 +107,11 @@ export const SongLibrary: React.FC = () => {
         // Pause current song
         wasPlayingRef.current = true;
         audio.pause();
-        setCurrentTime(audio.currentTime);
+        setSongTimes(prev => {
+          const newMap = new Map(prev);
+          newMap.set(song.id, audio.currentTime);
+          return newMap;
+        });
         setPlayingSongId(null);
         
         // Show feedback popup on pause
@@ -111,11 +120,16 @@ export const SongLibrary: React.FC = () => {
           setShowFeedbackPopup(true);
         }
       } else {
-        // Stop all other songs
+        // Stop all other songs and reset their times
         audioRefs.current.forEach((a, id) => {
           if (id !== song.id) {
             a.pause();
             a.currentTime = 0;
+            setSongTimes(prev => {
+              const newMap = new Map(prev);
+              newMap.set(id, 0);
+              return newMap;
+            });
           }
         });
         // Play this song
@@ -125,8 +139,12 @@ export const SongLibrary: React.FC = () => {
         const existingListeners = (audio as any)._timeUpdateHandler;
         if (!existingListeners) {
           const handleTimeUpdate = () => {
-            if (audio && !audio.paused) {
-              setCurrentTime(audio.currentTime);
+            if (audio && !audio.paused && playingSongId === song.id) {
+              setSongTimes(prev => {
+                const newMap = new Map(prev);
+                newMap.set(song.id, audio.currentTime);
+                return newMap;
+              });
             }
           };
           audio.addEventListener('timeupdate', handleTimeUpdate);
@@ -149,25 +167,40 @@ export const SongLibrary: React.FC = () => {
           setPlayingSongId(null);
         });
         setPlayingSongId(song.id);
-        setCurrentTime(audio.currentTime || 0);
+        setSongTimes(prev => {
+          const newMap = new Map(prev);
+          newMap.set(song.id, audio.currentTime || 0);
+          return newMap;
+        });
       }
     } else {
       // Validate and prepare URL
       let audioUrl = song.url.trim();
       
-      // Check if it's a YouTube URL first
-      if (isYouTubeUrl(audioUrl)) {
-        const videoId = extractYouTubeVideoId(audioUrl);
-        showNotification(
-          `⚠️ YouTube URLs are not directly supported. To use YouTube videos:\n\n` +
-          `1. Use a YouTube to MP3 converter (like ytmp3.cc, y2mate.com, etc.)\n` +
-          `2. Download the audio file and upload to Google Drive or use a direct link\n` +
-          `3. Use the direct audio URL in this field\n\n` +
-          `Video ID: ${videoId || 'unknown'}`,
-          'error',
-          10000 // Show for 10 seconds
-        );
-        return;
+      // Check if it's a YouTube or Suno URL - extract audio automatically
+      if (isYouTubeUrl(audioUrl) || isSunoUrl(audioUrl)) {
+        setExtractingAudioId(song.id);
+        showNotification('🎵 Extracting audio from link... This may take a moment.', 'info');
+        
+        try {
+          const extractionResult = await audioExtractionService.extractAudioFromYouTube(audioUrl);
+          
+          // Update the song with extracted audio URL
+          // Note: We'll use the extracted URL for playback, but keep original URL in song data
+          audioUrl = extractionResult.audioUrl;
+          
+          showNotification(`✅ Audio extracted: ${extractionResult.title}`, 'success');
+        } catch (error: any) {
+          showNotification(
+            `❌ Failed to extract audio: ${error.message}. Please try again or use a direct audio URL.`,
+            'error',
+            8000
+          );
+          setExtractingAudioId(null);
+          return;
+        } finally {
+          setExtractingAudioId(null);
+        }
       }
 
       // Validate URL format and type
@@ -201,7 +234,12 @@ export const SongLibrary: React.FC = () => {
       const handleTimeUpdate = () => {
         const audio = audioRefs.current.get(songId);
         if (audio && !audio.paused) {
-          setCurrentTime(audio.currentTime);
+          // Only update if this song is currently playing
+          setSongTimes(prev => {
+            const newMap = new Map(prev);
+            newMap.set(songId, audio.currentTime);
+            return newMap;
+          });
         }
       };
       
@@ -226,7 +264,11 @@ export const SongLibrary: React.FC = () => {
         showNotification(userMessage, 'error');
         console.error('Audio load error:', newAudio.error || e, 'URL:', audioUrl);
         setPlayingSongId(null);
-        setCurrentTime(0);
+        setSongTimes(prev => {
+          const newMap = new Map(prev);
+          newMap.set(song.id, 0);
+          return newMap;
+        });
       };
 
       const handleLoadedMetadata = () => {
@@ -244,7 +286,11 @@ export const SongLibrary: React.FC = () => {
       
       newAudio.addEventListener('ended', () => {
         setPlayingSongId(null);
-        setCurrentTime(0);
+        setSongTimes(prev => {
+          const newMap = new Map(prev);
+          newMap.set(song.id, 0);
+          return newMap;
+        });
         if (intervalRef.current) {
           clearInterval(intervalRef.current);
           intervalRef.current = null;
@@ -284,14 +330,22 @@ export const SongLibrary: React.FC = () => {
       
       // Set playing state first, then attempt to play
       setPlayingSongId(song.id);
-      setCurrentTime(0);
+      setSongTimes(prev => {
+        const newMap = new Map(prev);
+        newMap.set(song.id, 0);
+        return newMap;
+      });
       
       // Wait for metadata to load before playing
       const attemptPlay = () => {
         newAudio.play()
           .then(() => {
             console.log('Audio playback started:', song.title);
-            setCurrentTime(newAudio.currentTime || 0);
+            setSongTimes(prev => {
+              const newMap = new Map(prev);
+              newMap.set(song.id, newAudio.currentTime || 0);
+              return newMap;
+            });
           })
           .catch((playError) => {
             console.error('Play error:', playError);
@@ -335,6 +389,15 @@ export const SongLibrary: React.FC = () => {
     showNotification('Review mode activated. Go to Timeline to add feedback!', 'success');
   };
 
+  const handleTranscript = (song: Song) => {
+    if (!song.url) {
+      showNotification('No audio URL available for transcription', 'warning');
+      return;
+    }
+    setTranscriptSong(song);
+    setShowTranscriptModal(true);
+  };
+
   return (
     <div className="song-library">
       <div className="flex justify-between items-center mb-4">
@@ -347,22 +410,75 @@ export const SongLibrary: React.FC = () => {
         </div>
       </div>
       <div className="space-y-2">
-        {playlist.map((song, index) => (
+        {playlist.map((song, index) => {
+          const songCurrentTime = songTimes.get(song.id) || 0;
+          const isPlaying = playingSongId === song.id;
+          const parseDuration = (durationStr: string): number => {
+            const parts = durationStr.split(':');
+            if (parts.length === 2) {
+              return parseInt(parts[0]) * 60 + parseInt(parts[1]);
+            }
+            return 0;
+          };
+          const songDuration = song.duration ? parseDuration(song.duration) : (audioRefs.current.get(song.id)?.duration || 0);
+          
+          return (
           <div key={song.id} className="flex items-center justify-between p-3 bg-gray-100 rounded">
             <div className="flex-1">
+              {/* Timeline for each song */}
+              {song.url && (
+                <SongTimeline
+                  currentTime={songCurrentTime}
+                  duration={songDuration}
+                  isPlaying={isPlaying}
+                  onSeek={(time) => {
+                    const audio = audioRefs.current.get(song.id);
+                    if (audio) {
+                      audio.currentTime = time;
+                      setSongTimes(prev => {
+                        const newMap = new Map(prev);
+                        newMap.set(song.id, time);
+                        return newMap;
+                      });
+                    }
+                  }}
+                />
+              )}
               <h3 className="font-medium">{song.title}</h3>
               {song.artist && <p className="text-sm text-gray-600">{song.artist}</p>}
               {song.duration && <p className="text-sm text-gray-500">{song.duration}</p>}
             </div>
             <div className="flex space-x-2">
+              {extractingAudioId === song.id ? (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled
+                  title="Extracting audio..."
+                >
+                  ⏳
+                </Button>
+              ) : (
+                song.url && (
+                  <Button
+                    size="sm"
+                    variant={playingSongId === song.id ? "primary" : "secondary"}
+                    onClick={() => handlePreview(song)}
+                    disabled={extractingAudioId !== null}
+                    title="Preview Audio"
+                  >
+                    {playingSongId === song.id ? '⏸️' : '▶️'}
+                  </Button>
+                )
+              )}
               {song.url && (
                 <Button
                   size="sm"
-                  variant={playingSongId === song.id ? "primary" : "secondary"}
-                  onClick={() => handlePreview(song)}
-                  title="Preview Audio"
+                  variant="secondary"
+                  onClick={() => handleTranscript(song)}
+                  title="Transcribe Audio"
                 >
-                  {playingSongId === song.id ? '⏸️' : '▶️'}
+                  📝 Transcript
                 </Button>
               )}
               <Button size="sm" onClick={() => handleMoveUp(index)} disabled={index === 0} title="Move Up">
@@ -379,18 +495,12 @@ export const SongLibrary: React.FC = () => {
               </Button>
             </div>
           </div>
-        ))}
+        );
+        })}
         {playlist.length === 0 && (
           <p className="text-gray-500 text-center py-8">No songs in playlist. Add your first song!</p>
         )}
       </div>
-
-      {/* Timeline - Show when previewing */}
-      {playingSongId && (
-        <div className="mt-6">
-          <Timeline currentTime={currentTime} playingSongId={playingSongId} />
-        </div>
-      )}
 
       {/* Feedback Popup */}
       <FeedbackPopup
@@ -430,6 +540,15 @@ export const SongLibrary: React.FC = () => {
           setEditingSong(null);
         }}
         song={editingSong}
+      />
+
+      <TranscriptModal
+        isOpen={showTranscriptModal}
+        onClose={() => {
+          setShowTranscriptModal(false);
+          setTranscriptSong(null);
+        }}
+        song={transcriptSong || { id: '', title: '', url: '' }}
       />
     </div>
   );

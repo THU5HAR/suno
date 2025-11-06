@@ -46,7 +46,7 @@ interface PlaylistContextType {
   // Audio processing actions
   downloadSong: (songId: string) => Promise<void>;
   analyzeSong: (songId: string) => Promise<{ duration: number; format: string; sampleRate: number }>;
-  stitchPlaylist: (crossfadeDuration?: number) => Promise<void>;
+  stitchPlaylist: (crossfadeDuration?: number, delayBetweenSongs?: number) => Promise<void>;
   downloadStitchedAudio: () => Promise<void>;
   clearAudioCache: () => void;
 }
@@ -481,7 +481,7 @@ export const PlaylistProvider: React.FC<PlaylistProviderProps> = ({ children }) 
     }
   }, [state.playlist, updateProcessingState]);
 
-  const stitchPlaylist = useCallback(async (crossfadeDuration: number = 2) => {
+  const stitchPlaylist = useCallback(async (crossfadeDuration: number = 2, delayBetweenSongs: number = 0) => {
     if (state.playlist.length === 0) {
       throw new Error('No songs in playlist to stitch');
     }
@@ -496,6 +496,7 @@ export const PlaylistProvider: React.FC<PlaylistProviderProps> = ({ children }) 
       const stitchedBuffer = await audioService.stitchPlaylistSongs(
         state.playlist,
         crossfadeDuration,
+        delayBetweenSongs,
         (processingState) => {
           updateProcessingState(processingState);
         }

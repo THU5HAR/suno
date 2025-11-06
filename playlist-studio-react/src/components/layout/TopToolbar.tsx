@@ -2,7 +2,7 @@ import React from 'react';
 import { usePlaylist } from '@/context/PlaylistContext';
 
 const TopToolbar: React.FC = () => {
-  const { currentStep, setCurrentStep } = usePlaylist();
+  const { currentStep, setCurrentStep, playlist, stitchedAudioUrl, markStepCompleted } = usePlaylist();
 
   const handlePrevStep = () => {
     if (currentStep > 1) {
@@ -11,6 +11,34 @@ const TopToolbar: React.FC = () => {
   };
 
   const handleNextStep = () => {
+    // Check if work was done on current step before marking as complete
+    let hasWorkBeenDone = false;
+
+    switch (currentStep) {
+      case 1: // Audio Editing
+        // Mark complete if songs were added
+        hasWorkBeenDone = playlist.length > 0;
+        break;
+      case 2: // Stitch Audio
+        // Mark complete if audio was stitched
+        hasWorkBeenDone = !!stitchedAudioUrl;
+        break;
+      case 3: // Video Design
+        // Always mark complete when moving forward (no confirmation needed)
+        hasWorkBeenDone = true;
+        break;
+      case 4: // Review & Export (final step)
+        // Always mark complete when reaching final step
+        hasWorkBeenDone = true;
+        break;
+    }
+
+    // Only mark as completed if work was done
+    if (hasWorkBeenDone) {
+      markStepCompleted(currentStep);
+    }
+
+    // Move to next step
     if (currentStep < 4) {
       setCurrentStep(currentStep + 1);
     }

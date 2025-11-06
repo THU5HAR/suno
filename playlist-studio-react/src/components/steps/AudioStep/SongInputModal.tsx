@@ -4,7 +4,8 @@ import { useNotifications } from '@/context/NotificationContext';
 import { Song } from '@/types';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
-import { validateAudioUrl, isYouTubeUrl, convertGoogleDriveUrl, extractYouTubeVideoId } from '@/utils/urlHelpers';
+import { validateAudioUrl, isYouTubeUrl, isSunoUrl, convertGoogleDriveUrl } from '@/utils/urlHelpers';
+import { audioExtractionService } from '@/services/audioExtractionService';
 
 interface SongInputModalProps {
   isOpen: boolean;
@@ -28,6 +29,7 @@ export const SongInputModal: React.FC<SongInputModalProps> = ({ isOpen, onClose,
   const [isDragOver, setIsDragOver] = useState(false);
   const bulkFileInputRef = useRef<HTMLInputElement>(null);
   const singleFileInputRef = useRef<HTMLInputElement>(null);
+  const [extractingAudio, setExtractingAudio] = useState<number | null>(null);
   const [formData, setFormData] = useState({
     title: '',
     artist: '',
@@ -123,11 +125,31 @@ export const SongInputModal: React.FC<SongInputModalProps> = ({ isOpen, onClose,
       return;
     }
 
-    // Add all preview songs with download progress
+    // Add all preview songs, extracting audio from YouTube URLs if needed
     for (const previewSong of previewSongs) {
+      let finalUrl = previewSong.url;
+      let finalTitle = previewSong.title;
+
+      // If it's a YouTube or Suno URL, extract audio first
+      if (previewSong.url && (isYouTubeUrl(previewSong.url) || isSunoUrl(previewSong.url))) {
+        try {
+          showNotification(`🎵 Extracting audio for "${previewSong.title}"...`, 'info');
+          const extractionResult = await audioExtractionService.extractAudioFromYouTube(previewSong.url);
+          finalUrl = extractionResult.audioUrl;
+          finalTitle = extractionResult.title || previewSong.title;
+          showNotification(`✅ Extracted: ${finalTitle}`, 'success');
+        } catch (error: any) {
+          showNotification(
+            `⚠️ Failed to extract audio for "${previewSong.title}": ${error.message}. Skipping...`,
+            'warning'
+          );
+          continue; // Skip this song if extraction fails
+        }
+      }
+
       addSong({
-        title: previewSong.title,
-        url: previewSong.url,
+        title: finalTitle,
+        url: finalUrl,
       });
     }
 
@@ -137,17 +159,42 @@ export const SongInputModal: React.FC<SongInputModalProps> = ({ isOpen, onClose,
     onClose();
   };
 
-  const handleSingleSubmit = (e: React.FormEvent) => {
+  const handleSingleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!formData.title.trim()) {
       return;
     }
 
+    let finalUrl = formData.url.trim() || undefined;
+    let finalTitle = formData.title.trim();
+
+    // If it's a YouTube or Suno URL, extract audio first
+    if (finalUrl && (isYouTubeUrl(finalUrl) || isSunoUrl(finalUrl))) {
+      try {
+        showNotification('🎵 Extracting audio from link...', 'info');
+        setExtractingAudio(-1); // Use -1 for single form mode
+        const extractionResult = await audioExtractionService.extractAudioFromYouTube(finalUrl);
+        finalUrl = extractionResult.audioUrl;
+        finalTitle = extractionResult.title || finalTitle;
+        showNotification(`✅ Audio extracted: ${finalTitle}`, 'success');
+      } catch (error: any) {
+        showNotification(
+          `❌ Failed to extract audio: ${error.message}. Please try again or use a direct audio URL.`,
+          'error',
+          8000
+        );
+        setExtractingAudio(null);
+        return;
+      } finally {
+        setExtractingAudio(null);
+      }
+    }
+
     const songData = {
-      title: formData.title.trim(),
+      title: finalTitle,
       artist: formData.artist.trim() || undefined,
-      url: formData.url.trim() || undefined,
+      url: finalUrl,
       duration: formData.duration.trim() || undefined,
       startTime: formData.startTime.trim() || undefined,
       album: formData.album.trim() || undefined,
@@ -220,7 +267,7 @@ export const SongInputModal: React.FC<SongInputModalProps> = ({ isOpen, onClose,
     }
   };
 
-  const handlePreviewPreviewSong = (previewSong: PreviewSong, index: number) => {
+  const handlePreviewPreviewSong = async (previewSong: PreviewSong, index: number) => {
     if (!previewSong.url) {
       showNotification('No URL available for this song', 'warning');
       return;
@@ -262,19 +309,40 @@ export const SongInputModal: React.FC<SongInputModalProps> = ({ isOpen, onClose,
       // Validate and prepare URL
       let audioUrl = previewSong.url.trim();
       
-      // Check if it's a YouTube URL first
-      if (isYouTubeUrl(audioUrl)) {
-        const videoId = extractYouTubeVideoId(audioUrl);
-        showNotification(
-          `⚠️ YouTube URLs are not directly supported. To use YouTube videos:\n\n` +
-          `1. Use a YouTube to MP3 converter (like ytmp3.cc, y2mate.com, etc.)\n` +
-          `2. Download the audio file and upload to Google Drive or use a direct link\n` +
-          `3. Use the direct audio URL in this field\n\n` +
-          `Video ID: ${videoId || 'unknown'}`,
-          'error',
-          10000
-        );
-        return;
+      // Check if it's a YouTube or Suno URL - extract audio automatically
+      if (isYouTubeUrl(audioUrl) || isSunoUrl(audioUrl)) {
+        setExtractingAudio(index);
+        showNotification('🎵 Extracting audio from link... This may take a moment.', 'info');
+        
+        try {
+          const extractionResult = await audioExtractionService.extractAudioFromYouTube(audioUrl);
+          
+          // Use the extracted audio URL
+          audioUrl = extractionResult.audioUrl;
+          
+          // Update the preview song with extracted info
+          if (previewSongs[index]) {
+            const updatedSongs = [...previewSongs];
+            updatedSongs[index] = {
+              ...updatedSongs[index],
+              title: extractionResult.title || updatedSongs[index].title,
+              url: audioUrl,
+            };
+            setPreviewSongs(updatedSongs);
+          }
+          
+          showNotification(`✅ Audio extracted successfully: ${extractionResult.title}`, 'success');
+        } catch (error: any) {
+          showNotification(
+            `❌ Failed to extract audio: ${error.message}. Please try again or use a direct audio URL.`,
+            'error',
+            8000
+          );
+          setExtractingAudio(null);
+          return;
+        } finally {
+          setExtractingAudio(null);
+        }
       }
 
       // Validate URL format and type
@@ -665,8 +733,8 @@ Another Song | https://url4.mp3`}
           <Button type="button" variant="secondary" onClick={onClose}>
             Cancel
           </Button>
-          <Button type="submit">
-            {song ? 'Update Song' : 'Add Song'}
+          <Button type="submit" disabled={extractingAudio === -1}>
+            {extractingAudio === -1 ? 'Extracting...' : (song ? 'Update Song' : 'Add Song')}
           </Button>
         </div>
       </form>
@@ -696,23 +764,32 @@ Another Song | https://url4.mp3`}
                       </div>
                     </div>
                     <div className="flex items-center gap-2 ml-2">
-                      {previewSong.url && (
-                        <button
-                          type="button"
-                          onClick={() => handlePreviewPreviewSong(previewSong, index)}
-                          className={`px-2 py-1 text-xs rounded transition-colors ${
-                            playingPreviewIndex === index
-                              ? 'bg-blue-500 text-white'
-                              : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                          }`}
-                          title="Preview Audio"
-                        >
-                          {playingPreviewIndex === index ? '⏸️' : '▶️'}
-                        </button>
+                      {extractingAudio === index ? (
+                        <span className="px-2 py-1 text-xs bg-blue-100 text-blue-800 rounded animate-pulse">
+                          Extracting...
+                        </span>
+                      ) : (
+                        <>
+                          {previewSong.url && (
+                            <button
+                              type="button"
+                              onClick={() => handlePreviewPreviewSong(previewSong, index)}
+                              disabled={extractingAudio !== null}
+                              className={`px-2 py-1 text-xs rounded transition-colors ${
+                                playingPreviewIndex === index
+                                  ? 'bg-blue-500 text-white'
+                                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                              } ${extractingAudio !== null ? 'opacity-50 cursor-not-allowed' : ''}`}
+                              title="Preview Audio"
+                            >
+                              {playingPreviewIndex === index ? '⏸️' : '▶️'}
+                            </button>
+                          )}
+                          <span className="px-2 py-1 text-xs bg-yellow-100 text-yellow-800 rounded">
+                            Pending
+                          </span>
+                        </>
                       )}
-                      <span className="px-2 py-1 text-xs bg-yellow-100 text-yellow-800 rounded">
-                        Pending
-                      </span>
                     </div>
                   </div>
                 ))}

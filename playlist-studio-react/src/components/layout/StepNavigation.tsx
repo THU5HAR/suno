@@ -3,7 +3,41 @@ import { usePlaylist } from '@/context/PlaylistContext';
 import { STEP_LABELS } from '@/utils/constants';
 
 const StepNavigation: React.FC = () => {
-  const { currentStep, stepCompletion, setCurrentStep } = usePlaylist();
+  const { currentStep, stepCompletion, setCurrentStep, playlist, stitchedAudioUrl, markStepCompleted } = usePlaylist();
+
+  const handleStepClick = (targetStep: number) => {
+    // If clicking on a different step, check if work was done on current step
+    if (targetStep !== currentStep) {
+      let hasWorkBeenDone = false;
+
+      switch (currentStep) {
+        case 1: // Audio Editing
+          // Mark complete if songs were added
+          hasWorkBeenDone = playlist.length > 0;
+          break;
+        case 2: // Stitch Audio
+          // Mark complete if audio was stitched
+          hasWorkBeenDone = !!stitchedAudioUrl;
+          break;
+        case 3: // Video Design
+          // Always mark complete when moving forward (no confirmation needed)
+          hasWorkBeenDone = true;
+          break;
+        case 4: // Review & Export (final step)
+          // Always mark complete when reaching final step
+          hasWorkBeenDone = true;
+          break;
+      }
+
+      // Only mark as completed if work was done
+      if (hasWorkBeenDone) {
+        markStepCompleted(currentStep);
+      }
+    }
+
+    // Navigate to the clicked step
+    setCurrentStep(targetStep);
+  };
 
   const getStepClass = (stepNumber: number) => {
     const baseClasses = 'step-item';
@@ -25,7 +59,7 @@ const StepNavigation: React.FC = () => {
             <div
               key={stepNumber}
               className={getStepClass(stepNumber)}
-              onClick={() => setCurrentStep(stepNumber)}
+              onClick={() => handleStepClick(stepNumber)}
             >
               <div className="step-number">{stepNumber}</div>
               <div className="step-label">{STEP_LABELS[stepNumber as keyof typeof STEP_LABELS]}</div>

@@ -1,7 +1,7 @@
 export const STEPS = {
   AUDIO: 1,
-  VIDEO: 2,
-  STITCH: 3,
+  STITCH: 2,
+  VIDEO: 3,
   EXPORT: 4
 } as const;
 

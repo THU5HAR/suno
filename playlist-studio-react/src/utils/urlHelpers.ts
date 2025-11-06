@@ -10,6 +10,30 @@ export const isYouTubeUrl = (url: string): boolean => {
   );
 };
 
+export const isSunoUrl = (url: string): boolean => {
+  if (!url) return false;
+  const normalizedUrl = url.trim().toLowerCase();
+  return normalizedUrl.includes('suno.com/s/') || normalizedUrl.includes('suno.ai/s/');
+};
+
+export const extractSunoSongId = (url: string): string | null => {
+  if (!url) return null;
+  
+  // Handle Suno URL formats: https://suno.com/s/[id] or https://suno.ai/s/[id]
+  const patterns = [
+    /suno\.(com|ai)\/s\/([a-zA-Z0-9_-]+)/,
+  ];
+  
+  for (const pattern of patterns) {
+    const match = url.match(pattern);
+    if (match && match[2]) {
+      return match[2];
+    }
+  }
+  
+  return null;
+};
+
 export const extractYouTubeVideoId = (url: string): string | null => {
   if (!url) return null;
   
@@ -55,7 +79,7 @@ export const convertGoogleDriveUrl = (url: string): string | null => {
 export const validateAudioUrl = (url: string): {
   isValid: boolean;
   error?: string;
-  urlType?: 'youtube' | 'google_drive' | 'direct' | 'unknown';
+  urlType?: 'youtube' | 'suno' | 'google_drive' | 'direct' | 'unknown';
 } => {
   if (!url || !url.trim()) {
     return { isValid: false, error: 'URL is required' };
@@ -63,12 +87,19 @@ export const validateAudioUrl = (url: string): {
 
   const trimmedUrl = url.trim();
 
-  // Check if it's a YouTube URL
+  // Check if it's a YouTube URL - now supported with automatic extraction
   if (isYouTubeUrl(trimmedUrl)) {
     return {
-      isValid: false,
-      error: 'YouTube URLs are not directly supported. Please use a direct audio file URL or convert the YouTube video to an audio file first.',
+      isValid: true, // Now valid - will be extracted automatically
       urlType: 'youtube',
+    };
+  }
+
+  // Check if it's a Suno.com URL - now supported with automatic extraction
+  if (isSunoUrl(trimmedUrl)) {
+    return {
+      isValid: true, // Now valid - will be extracted automatically
+      urlType: 'suno',
     };
   }
 

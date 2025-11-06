@@ -81,17 +81,6 @@ const Sidebar: React.FC = () => {
       case 2:
         return (
           <div className="space-y-6">
-            <DesignTools
-              onAddText={() => getVideoEditorRef()?.addText()}
-              onAddImage={() => {
-                const imageUrl = prompt('Enter image URL:');
-                if (imageUrl) {
-                  getVideoEditorRef()?.addImage(imageUrl);
-                }
-              }}
-              onClearCanvas={() => getVideoEditorRef()?.clearCanvas()}
-            />
-
             <div>
               <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-4">
                 Project Summary
@@ -124,6 +113,16 @@ const Sidebar: React.FC = () => {
               >
                 🎵 Edit Audio
               </Button>
+              <Button
+                variant="secondary"
+                className="w-full"
+                onClick={() => {
+                  setCurrentStep(3);
+                  showNotification('Switched to Video step', 'info');
+                }}
+              >
+                🎬 Edit Video
+              </Button>
             </div>
           </div>
         );
@@ -131,6 +130,12 @@ const Sidebar: React.FC = () => {
       case 3:
         return (
           <div className="space-y-6">
+            <DesignTools
+              onAddText={() => getVideoEditorRef()?.addText()}
+              onAddImage={(imageUrl) => getVideoEditorRef()?.addImage(imageUrl)}
+              onClearCanvas={() => getVideoEditorRef()?.clearCanvas()}
+            />
+
             <div>
               <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-4">
                 Project Summary
