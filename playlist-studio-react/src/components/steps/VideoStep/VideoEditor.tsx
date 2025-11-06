@@ -14,7 +14,7 @@ interface VideoEditorProps {
 }
 
 export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThumbnailChange }, ref) => {
-  const { playlist, stitchedAudioUrl } = usePlaylist();
+  const { playlist, stitchedAudioUrl, stepData } = usePlaylist();
   const { showNotification } = useNotifications();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -69,7 +69,7 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
     };
 
     // Get delay from stitch settings (default 0)
-    const delayBetweenSongs = 0; // TODO: Get from context if stored
+    const delayBetweenSongs = stepData[2]?.stitchSettings?.delayBetweenSongs ?? 0;
 
     let accumulatedTime = 0;
     return playlist.map((song, index) => {

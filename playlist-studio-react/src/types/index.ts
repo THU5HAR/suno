@@ -32,6 +32,10 @@ export interface StepData {
   assets: Asset[];
   timestamp: string;
   stepNumber: number;
+  stitchSettings?: {
+    crossfadeDuration?: number;
+    delayBetweenSongs?: number;
+  };
 }
 
 export interface ProjectState {

@@ -3,7 +3,7 @@ import { usePlaylist } from '@/context/PlaylistContext';
 import { Button } from '@/components/ui/Button';
 
 export const VideoPreview: React.FC = () => {
-  const { playlist, stitchedAudioUrl } = usePlaylist();
+  const { playlist, stitchedAudioUrl, stepData } = usePlaylist();
   
   // Get thumbnail settings from window (set by VideoEditor)
   const [thumbnailSettings, setThumbnailSettings] = useState<any>(null);
@@ -39,7 +39,7 @@ export const VideoPreview: React.FC = () => {
     };
 
     // Get delay from stitch settings (default 0)
-    const delayBetweenSongs = 0; // TODO: Get from context if stored
+    const delayBetweenSongs = stepData[2]?.stitchSettings?.delayBetweenSongs ?? 0;
 
     let accumulatedTime = 0;
     return playlist.map((song, index) => {

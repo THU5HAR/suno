@@ -11,10 +11,13 @@ export const StitchPanel: React.FC = () => {
     stitchPlaylist,
     processingState,
     isGenerating,
+    stepData,
   } = usePlaylist();
   const { showNotification } = useNotifications();
-  const [crossfadeDuration, setCrossfadeDuration] = useState(1);
-  const [delayBetweenSongs, setDelayBetweenSongs] = useState(0);
+  // Load stitch settings from stepData if available
+  const stitchSettings = stepData[2]?.stitchSettings;
+  const [crossfadeDuration, setCrossfadeDuration] = useState(stitchSettings?.crossfadeDuration ?? 1);
+  const [delayBetweenSongs, setDelayBetweenSongs] = useState(stitchSettings?.delayBetweenSongs ?? 0);
   const [downloadStatus, setDownloadStatus] = useState<Record<string, 'pending' | 'downloading' | 'completed' | 'cached'>>({});
 
   // Update download status based on processing state
