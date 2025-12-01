@@ -108,7 +108,6 @@ The `render.yaml` file is already configured with all necessary settings. You ca
 - [ ] Verify frontend is accessible at Vercel URL
 - [ ] Verify backend health check: `https://music-video-gen.onrender.com/api/health`
 - [ ] Test audio extraction from YouTube/Suno
-- [ ] Test transcription service
 - [ ] Verify CORS is working (frontend can call backend)
 - [ ] Check backend logs for any errors
 - [ ] Update `ALLOWED_ORIGINS` in backend if frontend URL changes

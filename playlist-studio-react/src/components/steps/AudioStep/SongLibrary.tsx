@@ -6,7 +6,6 @@ import { Button } from '@/components/ui/Button';
 import { SongInputModal } from './SongInputModal';
 import { SongTimeline } from './SongTimeline';
 import { FeedbackPopup } from './FeedbackPopup';
-import { TranscriptModal } from './TranscriptModal';
 import { googleDriveService } from '@/services/googleDriveService';
 import { validateAudioUrl, isYouTubeUrl, isSunoUrl, convertGoogleDriveUrl } from '@/utils/urlHelpers';
 import { audioExtractionService } from '@/services/audioExtractionService';
@@ -20,8 +19,6 @@ export const SongLibrary: React.FC = () => {
   const [songTimes, setSongTimes] = useState<Map<string, number>>(new Map());
   const [showFeedbackPopup, setShowFeedbackPopup] = useState(false);
   const [pauseTimestamp, setPauseTimestamp] = useState<{ songIndex: number; timestamp: number } | null>(null);
-  const [showTranscriptModal, setShowTranscriptModal] = useState(false);
-  const [transcriptSong, setTranscriptSong] = useState<Song | null>(null);
   const [extractingAudioId, setExtractingAudioId] = useState<string | null>(null);
   const audioRefs = useRef<Map<string, HTMLAudioElement>>(new Map());
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -389,15 +386,6 @@ export const SongLibrary: React.FC = () => {
     showNotification('Review mode activated. Go to Timeline to add feedback!', 'success');
   };
 
-  const handleTranscript = (song: Song) => {
-    if (!song.url) {
-      showNotification('No audio URL available for transcription', 'warning');
-      return;
-    }
-    setTranscriptSong(song);
-    setShowTranscriptModal(true);
-  };
-
   return (
     <div className="song-library">
       <div className="flex justify-between items-center mb-4">
@@ -471,16 +459,6 @@ export const SongLibrary: React.FC = () => {
                   </Button>
                 )
               )}
-              {song.url && (
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onClick={() => handleTranscript(song)}
-                  title="Transcribe Audio"
-                >
-                  📝 Transcript
-                </Button>
-              )}
               <Button size="sm" onClick={() => handleMoveUp(index)} disabled={index === 0} title="Move Up">
                 ↑
               </Button>
@@ -540,15 +518,6 @@ export const SongLibrary: React.FC = () => {
           setEditingSong(null);
         }}
         song={editingSong}
-      />
-
-      <TranscriptModal
-        isOpen={showTranscriptModal}
-        onClose={() => {
-          setShowTranscriptModal(false);
-          setTranscriptSong(null);
-        }}
-        song={transcriptSong || { id: '', title: '', url: '' }}
       />
     </div>
   );

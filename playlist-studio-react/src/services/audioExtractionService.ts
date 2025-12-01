@@ -44,18 +44,27 @@ export class AudioExtractionService {
       onProgress?.(30);
 
       // Call backend API to extract audio (supports YouTube, Suno, etc.)
-      const response = await fetch(`${this.apiBaseUrl}/api/extract-audio?url=${encodeURIComponent(videoUrl)}`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
+      let response: Response;
+      try {
+        response = await fetch(`${this.apiBaseUrl}/api/extract-audio?url=${encodeURIComponent(videoUrl)}`, {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        });
+      } catch (fetchError: any) {
+        // Check if it's a network error (backend not running)
+        if (fetchError.message?.includes('Failed to fetch') || fetchError.message?.includes('NetworkError')) {
+          throw new Error(`Cannot connect to backend server at ${this.apiBaseUrl}. Please ensure the backend is running.`);
+        }
+        throw fetchError;
+      }
 
       onProgress?.(70);
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({ error: response.statusText }));
-        throw new Error(errorData.error || `Failed to extract audio: ${response.statusText}`);
+        throw new Error(errorData.error || errorData.details || `Failed to extract audio: ${response.statusText}`);
       }
 
       const result = await response.json();
