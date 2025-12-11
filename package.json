@@ -12,8 +12,7 @@
     "dev:frontend": "cd playlist-studio-react && npm run dev",
     "build:backend": "cd backend && npm install",
     "build:frontend": "cd playlist-studio-react && npm run build",
-    "install:all": "npm install && cd backend && npm install && cd ../playlist-studio-react && npm install",
-    "postinstall": "echo 'Root package.json - use backend/package.json or playlist-studio-react/package.json for deployment'"
+    "install:all": "npm install && cd backend && npm install && cd ../playlist-studio-react && npm install"
   },
   "keywords": [
     "playlist",

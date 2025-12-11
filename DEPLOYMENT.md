@@ -1,8 +1,8 @@
 # Deployment Guide
 
 This project is deployed on two platforms:
-- **Frontend (React)**: Vercel - https://suno-rho.vercel.app/
-- **Backend (Node.js/Express)**: Render - https://music-video-gen.onrender.com
+- **Frontend (React)**: Vercel
+- **Backend (Node.js/Express)**: Render
 
 ## Frontend Deployment (Vercel)
 
@@ -14,7 +14,7 @@ This project is deployed on two platforms:
 
 1. **Connect Repository to Vercel**
    - Go to https://vercel.com/new
-   - Import your GitHub repository: `THU5HAR/suno`
+   - Import your GitHub repository
    - Select the root directory: `playlist-studio-react`
 
 2. **Configure Build Settings**
@@ -34,7 +34,7 @@ This project is deployed on two platforms:
 4. **Deploy**
    - Click "Deploy"
    - Vercel will automatically build and deploy your frontend
-   - Your app will be available at: https://suno-rho.vercel.app/
+   - Your app will be available at your Vercel URL (e.g., `https://your-app.vercel.app`)
 
 ### Vercel Configuration
 The `vercel.json` file is already configured with:
@@ -53,7 +53,7 @@ The `vercel.json` file is already configured with:
 1. **Create New Web Service**
    - Go to https://dashboard.render.com
    - Click "New +" → "Web Service"
-   - Connect your GitHub repository: `THU5HAR/suno`
+   - Connect your GitHub repository
 
 2. **Configure Service**
    - Name: `playlist-studio-backend`
@@ -71,7 +71,7 @@ The `vercel.json` file is already configured with:
    PORT=3001
    JWT_SECRET=<generate-a-secure-random-string>
    DATABASE_PATH=./data/playlist-studio.db
-   ALLOWED_ORIGINS=https://suno-rho.vercel.app,https://music-video-gen.onrender.com
+   ALLOWED_ORIGINS=https://your-frontend.vercel.app
    MAX_FILE_SIZE=104857600
    UPLOAD_DIR=./uploads
    ```
@@ -84,7 +84,7 @@ The `vercel.json` file is already configured with:
 4. **Deploy**
    - Click "Create Web Service"
    - Render will automatically build and deploy your backend
-   - Your API will be available at: https://music-video-gen.onrender.com
+   - Your API will be available at your Render URL (e.g., `https://your-backend.onrender.com`)
 
 ### Render Configuration
 The `render.yaml` file is already configured with all necessary settings. You can use it for automated deployment or manually configure as above.
@@ -106,11 +106,12 @@ The `render.yaml` file is already configured with all necessary settings. You ca
 ## Post-Deployment Checklist
 
 - [ ] Verify frontend is accessible at Vercel URL
-- [ ] Verify backend health check: `https://music-video-gen.onrender.com/api/health`
+- [ ] Verify backend health check: `https://your-backend.onrender.com/api/health`
+- [ ] Update `ALLOWED_ORIGINS` in backend with your Vercel frontend URL
+- [ ] Update `VITE_API_BASE_URL` in Vercel with your Render backend URL
 - [ ] Test audio extraction from YouTube/Suno
 - [ ] Verify CORS is working (frontend can call backend)
 - [ ] Check backend logs for any errors
-- [ ] Update `ALLOWED_ORIGINS` in backend if frontend URL changes
 
 ## Troubleshooting
 
