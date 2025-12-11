@@ -1,0 +1,27 @@
+{
+  "name": "playlist-studio",
+  "version": "1.0.0",
+  "description": "Playlist Studio - Audio and Video Playlist Editor",
+  "private": true,
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  },
+  "scripts": {
+    "dev:backend": "cd backend && npm run dev",
+    "dev:frontend": "cd playlist-studio-react && npm run dev",
+    "build:backend": "cd backend && npm install",
+    "build:frontend": "cd playlist-studio-react && npm run build",
+    "install:all": "npm install && cd backend && npm install && cd ../playlist-studio-react && npm install",
+    "postinstall": "echo 'Root package.json - use backend/package.json or playlist-studio-react/package.json for deployment'"
+  },
+  "keywords": [
+    "playlist",
+    "audio",
+    "video",
+    "editor"
+  ],
+  "author": "",
+  "license": "MIT"
+}
+

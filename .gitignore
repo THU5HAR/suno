@@ -9,6 +9,9 @@ node_modules/
 # Production
 /build
 /dist
+playlist-studio-react/dist/
+backend/data/
+backend/uploads/
 
 # Misc
 .DS_Store
