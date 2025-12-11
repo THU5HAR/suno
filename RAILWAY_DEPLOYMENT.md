@@ -25,13 +25,14 @@ This guide will help you deploy Playlist Studio on Railway.
    - Select the same repository
    - Railway will create a service
 
-4. **Configure Backend Service**
+4. **Configure Backend Service** ⚠️ **CRITICAL STEP**
    - Click on the backend service
    - Go to "Settings" tab
-   - Set:
-     - **Root Directory:** `backend`
-     - **Build Command:** (leave empty - nixpacks.toml will handle it)
-     - **Start Command:** (leave empty - nixpacks.toml will handle it)
+   - **MUST SET:** **Root Directory:** `backend` ← This is essential!
+   - **Build Command:** (leave empty - nixpacks.toml will handle it)
+   - **Start Command:** (leave empty - nixpacks.toml will handle it)
+   
+   **If Root Directory is not set to `backend`, Railway will fail with "Missing script: start" error!**
 
 5. **Set Environment Variables**
    - Go to "Variables" tab
@@ -58,13 +59,14 @@ This guide will help you deploy Playlist Studio on Railway.
    - Select "GitHub Repo"
    - Choose the same repository
 
-2. **Configure Frontend Service**
+2. **Configure Frontend Service** ⚠️ **CRITICAL STEP**
    - Click on the frontend service
    - Go to "Settings" tab
-   - Set:
-     - **Root Directory:** `playlist-studio-react`
-     - **Build Command:** (leave empty - nixpacks.toml will handle it)
-     - **Start Command:** (leave empty - nixpacks.toml will handle it)
+   - **MUST SET:** **Root Directory:** `playlist-studio-react` ← This is essential!
+   - **Build Command:** (leave empty - nixpacks.toml will handle it)
+   - **Start Command:** (leave empty - nixpacks.toml will handle it)
+   
+   **If Root Directory is not set to `playlist-studio-react`, Railway will fail with "Missing script: start" error!**
 
 3. **Set Environment Variables**
    - Go to "Variables" tab
@@ -93,7 +95,6 @@ This guide will help you deploy Playlist Studio on Railway.
 
 The project includes Railway-specific configuration:
 
-- **`railway.json`**: Root Railway configuration
 - **`backend/nixpacks.toml`**: Backend build configuration
 - **`playlist-studio-react/nixpacks.toml`**: Frontend build configuration
 
@@ -103,16 +104,25 @@ These files tell Railway:
 - How to build the frontend
 - How to start each service
 
+**IMPORTANT:** Make sure you set the **Root Directory** correctly in Railway settings:
+- Backend service: Root Directory = `backend`
+- Frontend service: Root Directory = `playlist-studio-react`
+
+Without the correct Root Directory, Railway will try to run commands from the root, which will fail.
+
 ## Auto-Deployment
 
 Railway automatically deploys when you push to your GitHub repository's main branch.
 
 ## Troubleshooting
 
-### Build Fails
+### Build Fails / "Missing script: start" Error
+- **Most Common Issue:** Root Directory is not set correctly!
+  - Backend service MUST have Root Directory = `backend`
+  - Frontend service MUST have Root Directory = `playlist-studio-react`
 - Check build logs in Railway dashboard
-- Ensure Root Directory is set correctly (`backend` or `playlist-studio-react`)
 - Verify nixpacks.toml files are in the correct directories
+- Ensure you're not using the root directory (which has no start script)
 
 ### Port Errors
 - Railway automatically sets `PORT` environment variable
