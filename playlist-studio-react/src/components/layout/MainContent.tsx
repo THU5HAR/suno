@@ -1,8 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { usePlaylist } from '@/context/PlaylistContext';
 import { SongLibrary } from '@/components/steps/AudioStep/SongLibrary';
-import { parseCSV, parseExcel } from '@/utils/helpers';
-import { useNotifications } from '@/context/NotificationContext';
 import { StitchPanel } from '@/components/steps/ReviewStep/StitchPanel';
 import { ExportPanel } from '@/components/steps/ReviewStep/ExportPanel';
 import { ProjectSummary } from '@/components/steps/ReviewStep/ProjectSummary';
@@ -30,9 +28,7 @@ const StitchedAudioPreview: React.FC = () => {
 };
 
 const MainContent: React.FC = () => {
-  const { currentStep, addSong } = usePlaylist();
-  const { showNotification } = useNotifications();
-  const [isProcessingFile, setIsProcessingFile] = useState(false);
+  const { currentStep } = usePlaylist();
   const videoEditorRef = useRef<VideoEditorRef>(null);
   
   // Expose videoEditorRef to window for sidebar access (temporary solution)
@@ -59,62 +55,6 @@ const MainContent: React.FC = () => {
             </div>
 
             <div className="space-y-6">
-              <div className="flex justify-center">
-                <label htmlFor="csv-upload" className="cursor-pointer">
-                  <div className="upload-zone">
-                    <div className="upload-icon">📁</div>
-                    <div className="upload-text">Upload CSV or Excel File</div>
-                    <div className="upload-hint">Drop files here or click to browse</div>
-                  </div>
-                </label>
-                <input 
-                  type="file" 
-                  className="hidden" 
-                  id="csv-upload"
-                  accept=".csv,.xlsx,.xls"
-                  disabled={isProcessingFile}
-                  onChange={async (e) => {
-                    const file = e.target.files?.[0];
-                    if (!file) return;
-
-                    setIsProcessingFile(true);
-                    try {
-                      const fileExtension = file.name.split('.').pop()?.toLowerCase();
-                      let songs;
-
-                      if (fileExtension === 'csv') {
-                        songs = await parseCSV(file);
-                      } else if (fileExtension === 'xlsx' || fileExtension === 'xls') {
-                        songs = await parseExcel(file);
-                      } else {
-                        throw new Error('Unsupported file format. Please use CSV or Excel files.');
-                      }
-
-                      // Add all parsed songs to the playlist
-                      songs.forEach(song => {
-                        addSong(song);
-                      });
-
-                      showNotification(
-                        `Successfully added ${songs.length} song${songs.length !== 1 ? 's' : ''} from ${file.name}!`,
-                        'success'
-                      );
-
-                      // Reset file input
-                      e.target.value = '';
-                    } catch (error: any) {
-                      showNotification(
-                        `Failed to parse file: ${error.message}`,
-                        'error'
-                      );
-                      console.error('File parsing error:', error);
-                    } finally {
-                      setIsProcessingFile(false);
-                    }
-                  }}
-                />
-              </div>
-
               {/* Song Library Component */}
               <div className="bg-white rounded-lg border border-gray-200 p-6">
                 <SongLibrary />

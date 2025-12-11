@@ -300,14 +300,24 @@ router.get('/proxy', async (req, res) => {
 
     console.log(`Proxying audio from URL: ${url}`);
 
+    // Determine appropriate headers based on source
+    const isYouTube = url.includes('googlevideo.com') || url.includes('youtube.com');
+    const isSuno = url.includes('suno.com') || url.includes('suno.ai');
+    
+    const headers = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+      'Accept': 'audio/webm,audio/ogg,audio/wav,audio/*;q=0.9,application/ogg;q=0.7,video/*;q=0.6,*/*;q=0.5',
+    };
+    
+    // Add Referer header based on source
+    if (isSuno) {
+      headers['Referer'] = 'https://suno.com/';
+    } else if (isYouTube) {
+      headers['Referer'] = 'https://www.youtube.com/';
+    }
+
     // Fetch the audio file with proper headers
-    const audioResponse = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-        'Referer': 'https://suno.com/',
-        'Accept': 'audio/webm,audio/ogg,audio/wav,audio/*;q=0.9,application/ogg;q=0.7,video/*;q=0.6,*/*;q=0.5',
-      },
-    });
+    const audioResponse = await fetch(url, { headers });
 
     if (!audioResponse.ok) {
       return res.status(audioResponse.status).json({ 

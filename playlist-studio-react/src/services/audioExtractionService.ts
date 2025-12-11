@@ -74,9 +74,14 @@ export class AudioExtractionService {
         throw new Error(result.error || 'Audio extraction failed');
       }
 
-      // For Suno URLs, proxy through backend to avoid CORS issues
+      // Proxy through backend to avoid CORS issues for both YouTube and Suno URLs
+      // YouTube CDN URLs often have CORS restrictions, and Suno URLs may also have issues
       let finalAudioUrl = result.audioUrl;
-      if (videoUrl.includes('suno.com') || videoUrl.includes('suno.ai')) {
+      const isYouTube = videoUrl.includes('youtube.com') || videoUrl.includes('youtu.be');
+      const isSuno = videoUrl.includes('suno.com') || videoUrl.includes('suno.ai');
+      
+      if (isYouTube || isSuno) {
+        // Always proxy extracted URLs through backend to avoid CORS issues
         finalAudioUrl = `${this.apiBaseUrl}/api/extract-audio/proxy?url=${encodeURIComponent(result.audioUrl)}`;
       }
 

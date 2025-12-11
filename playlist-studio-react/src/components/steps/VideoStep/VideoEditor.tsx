@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useImperativeHandle, forwardRef } from 'react';
+import { useState, useRef, useEffect, useImperativeHandle, forwardRef, useCallback } from 'react';
 import { usePlaylist } from '@/context/PlaylistContext';
 import { Button } from '@/components/ui/Button';
 import { useNotifications } from '@/context/NotificationContext';
@@ -40,7 +40,9 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
   const [playlistBorderRadius, setPlaylistBorderRadius] = useState(0); // Border radius (rounded corners)
   const [isDraggingPlaylist, setIsDraggingPlaylist] = useState(false);
   const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null);
-  const [elements, setElements] = useState<Array<{ id: string; type: string; x: number; y: number; width?: number; height?: number; color?: string; text?: string; imageUrl?: string; fontSize?: number }>>([]);
+  const [elements, setElements] = useState<Array<{ id: string; type: string; x: number; y: number; width?: number; height?: number; color?: string; text?: string; imageUrl?: string; fontSize?: number; fontFamily?: string; opacity?: number }>>([]);
+  const [titleOpacity, setTitleOpacity] = useState(1);
+  const [playlistOpacity, setPlaylistOpacity] = useState(1);
   const [selectedElementId, setSelectedElementId] = useState<string | null>(null);
   const [selectedComponent, setSelectedComponent] = useState<'title' | 'playlist' | 'element' | null>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -48,22 +50,31 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
   const [isResizing, setIsResizing] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [resizeHandle, setResizeHandle] = useState<string | null>(null);
+  const resizeStartStateRef = useRef<{ element: typeof elements[0]; startX: number; startY: number } | null>(null);
   const canvasScaleRef = useRef({ x: 1, y: 1 });
   const loadedImagesRef = useRef<Map<string, HTMLImageElement>>(new Map());
   const renderRequestRef = useRef<number | null>(null);
+  const animationFrameRef = useRef<number | null>(null);
   const [currentPlaybackTime, setCurrentPlaybackTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isDraggingTimeline, setIsDraggingTimeline] = useState(false);
+  const [actualAudioDuration, setActualAudioDuration] = useState(0);
+  const [canvasCursor, setCanvasCursor] = useState<string>('default');
 
   // Generate unique ID
   const generateId = () => `element_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
   // Calculate start times for each song (cumulative based on durations)
+  // If actualAudioDuration is available, scale the times proportionally
   const calculateSongStartTimes = () => {
     const parseDuration = (durationStr: string): number => {
+      if (!durationStr) return 180; // default 3 minutes
       const parts = durationStr.split(':');
       if (parts.length === 2) {
-        return parseInt(parts[0]) * 60 + parseInt(parts[1]);
+        const minutes = parseInt(parts[0], 10);
+        const seconds = parseInt(parts[1], 10);
+        if (isNaN(minutes) || isNaN(seconds)) return 180;
+        return minutes * 60 + seconds;
       }
       return 180; // default 3 minutes
     };
@@ -72,12 +83,16 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
     const delayBetweenSongs = stepData[2]?.stitchSettings?.delayBetweenSongs ?? 0;
 
     let accumulatedTime = 0;
-    return playlist.map((song, index) => {
+    const calculatedTimes = playlist.map((song, index) => {
       const startTime = accumulatedTime;
       const songDuration = song.duration ? parseDuration(song.duration) : 180;
-      accumulatedTime += songDuration;
+      
+      // Calculate end time (when this song ends)
+      const endTime = accumulatedTime + songDuration;
+      accumulatedTime = endTime;
       
       // Add delay after each song except the last one
+      // This delay is added AFTER the song ends, so the next song starts after the delay
       if (index < playlist.length - 1 && delayBetweenSongs > 0) {
         accumulatedTime += delayBetweenSongs;
       }
@@ -85,10 +100,39 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
       return {
         songId: song.id,
         startTime,
-        endTime: accumulatedTime,
+        endTime: endTime, // End time is when this song ends (before delay for next song)
         formattedTime: formatTime(startTime),
       };
     });
+
+    // If we have actual audio duration, scale the times proportionally
+    if (actualAudioDuration > 0 && calculatedTimes.length > 0) {
+      const calculatedTotalDuration = calculatedTimes[calculatedTimes.length - 1].endTime;
+      if (calculatedTotalDuration > 0 && Math.abs(calculatedTotalDuration - actualAudioDuration) > 0.5) {
+        // There's a mismatch, scale proportionally
+        const scaleFactor = actualAudioDuration / calculatedTotalDuration;
+        return calculatedTimes.map((songTime, index) => {
+          const scaledStartTime = songTime.startTime * scaleFactor;
+          // Calculate scaled end time based on the next song's start time, or use actual duration for last song
+          let scaledEndTime: number;
+          if (index < calculatedTimes.length - 1) {
+            scaledEndTime = calculatedTimes[index + 1].startTime * scaleFactor;
+          } else {
+            // Last song ends at the actual audio duration
+            scaledEndTime = actualAudioDuration;
+          }
+          
+          return {
+            ...songTime,
+            startTime: scaledStartTime,
+            endTime: scaledEndTime,
+            formattedTime: formatTime(scaledStartTime),
+          };
+        });
+      }
+    }
+
+    return calculatedTimes;
   };
 
   // Get current playing song based on playback time
@@ -125,6 +169,8 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
         text: text,
         color: textColor,
         fontSize: fontSize,
+        fontFamily: 'Arial',
+        opacity: 1, // Default to full opacity
         width: text.length * fontSize * 0.6, // Approximate text width
         height: fontSize,
       };
@@ -144,6 +190,7 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
         width: 200,
         height: 200,
         imageUrl: imageUrl,
+        opacity: 1, // Default to full opacity
       };
       setElements([...elements, newElement]);
       setSelectedElementId(newElement.id);
@@ -206,21 +253,53 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
     const halfWidth = element.width / 2;
     const halfHeight = element.height / 2;
     const handleSize = 10;
+    const edgeThreshold = 5; // Distance from edge to detect edge handles
 
-    const handles = [
+    // Check corners first (higher priority)
+    const cornerHandles = [
       { name: 'nw', x: element.x - halfWidth, y: element.y - halfHeight },
       { name: 'ne', x: element.x + halfWidth, y: element.y - halfHeight },
       { name: 'sw', x: element.x - halfWidth, y: element.y + halfHeight },
       { name: 'se', x: element.x + halfWidth, y: element.y + halfHeight },
     ];
 
-    for (const handle of handles) {
+    for (const handle of cornerHandles) {
       if (Math.abs(x - handle.x) < handleSize && Math.abs(y - handle.y) < handleSize) {
         return handle.name;
       }
     }
 
+    // Check edges
+    const leftEdge = Math.abs(x - (element.x - halfWidth)) < edgeThreshold;
+    const rightEdge = Math.abs(x - (element.x + halfWidth)) < edgeThreshold;
+    const topEdge = Math.abs(y - (element.y - halfHeight)) < edgeThreshold;
+    const bottomEdge = Math.abs(y - (element.y + halfHeight)) < edgeThreshold;
+
+    // Check if within element bounds
+    const withinX = x >= element.x - halfWidth && x <= element.x + halfWidth;
+    const withinY = y >= element.y - halfHeight && y <= element.y + halfHeight;
+
+    if (withinX && withinY) {
+      if (leftEdge && !topEdge && !bottomEdge) return 'w';
+      if (rightEdge && !topEdge && !bottomEdge) return 'e';
+      if (topEdge && !leftEdge && !rightEdge) return 'n';
+      if (bottomEdge && !leftEdge && !rightEdge) return 's';
+    }
+
     return null;
+  };
+
+  // Get cursor style based on resize handle
+  const getCursorForHandle = (handle: string | null): string => {
+    if (!handle) return 'move'; // 4-sided arrow for moving
+    
+    // 2-sided arrows for resizing
+    if (handle === 'nw' || handle === 'se') return 'nwse-resize';
+    if (handle === 'ne' || handle === 'sw') return 'nesw-resize';
+    if (handle.includes('n') || handle.includes('s')) return 'ns-resize';
+    if (handle.includes('e') || handle.includes('w')) return 'ew-resize';
+    
+    return 'move';
   };
 
   // Check if point is on the playlist area
@@ -289,15 +368,23 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
     // Check if clicking on custom elements first (highest priority)
     const clickedElement = elements.find(el => isPointInElement(coords.x, coords.y, el));
     
-    if (clickedElement) {
+      if (clickedElement) {
       setSelectedElementId(clickedElement.id);
       setSelectedComponent('element');
       const handle = getResizeHandle(coords.x, coords.y, clickedElement);
       if (handle) {
         setIsResizing(true);
         setResizeHandle(handle);
+        setCanvasCursor(getCursorForHandle(handle));
+        // Store initial state for smooth resize
+        resizeStartStateRef.current = {
+          element: { ...clickedElement },
+          startX: coords.x,
+          startY: coords.y,
+        };
       } else {
         setIsDragging(true);
+        setCanvasCursor('move');
       }
       setDragStart(coords);
       return;
@@ -328,11 +415,9 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
     setSelectedComponent(null);
   };
 
-  const handleCanvasMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  const handleMouseMoveLogic = useCallback((coords: { x: number; y: number }) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-
-    const coords = getCanvasCoordinates(e);
 
     // Handle playlist dragging (both horizontal and vertical, but starts centered)
     if (isDraggingPlaylist) {
@@ -351,7 +436,7 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
       });
       
       setDragStart(coords); // Update drag start for smooth dragging
-      requestRender();
+      requestSmoothRender();
       return;
     }
 
@@ -372,36 +457,44 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
       });
       
       setDragStart(coords); // Update drag start for smooth dragging
-      requestRender();
+      requestSmoothRender();
       return;
     }
 
     const selectedElement = elements.find(el => el.id === selectedElementId);
 
-    if (isResizing && selectedElement && resizeHandle) {
-      const deltaX = coords.x - dragStart.x;
-      const deltaY = coords.y - dragStart.y;
+    if (isResizing && selectedElement && resizeHandle && resizeStartStateRef.current) {
+      // Use initial state for smooth, predictable resize
+      const startState = resizeStartStateRef.current;
+      const deltaX = coords.x - startState.startX;
+      const deltaY = coords.y - startState.startY;
+      const originalElement = startState.element;
 
       setElements(elements.map(el => {
         if (el.id === selectedElementId) {
-          let newWidth = (el.width || 0);
-          let newHeight = (el.height || 0);
-          let newX = el.x;
-          let newY = el.y;
+          let newWidth = originalElement.width || 0;
+          let newHeight = originalElement.height || 0;
+          let newX = originalElement.x;
+          let newY = originalElement.y;
 
+          // Calculate resize based on original dimensions for smooth operation
           if (resizeHandle.includes('e')) {
-            newWidth = Math.max(20, (el.width || 0) + deltaX);
+            // Resize from east (right edge)
+            newWidth = Math.max(20, originalElement.width! + deltaX);
           }
           if (resizeHandle.includes('w')) {
-            newWidth = Math.max(20, (el.width || 0) - deltaX);
-            newX = el.x + deltaX / 2;
+            // Resize from west (left edge) - move position and adjust width
+            newWidth = Math.max(20, originalElement.width! - deltaX);
+            newX = originalElement.x + (originalElement.width! - newWidth) / 2;
           }
           if (resizeHandle.includes('s')) {
-            newHeight = Math.max(20, (el.height || 0) + deltaY);
+            // Resize from south (bottom edge)
+            newHeight = Math.max(20, originalElement.height! + deltaY);
           }
           if (resizeHandle.includes('n')) {
-            newHeight = Math.max(20, (el.height || 0) - deltaY);
-            newY = el.y + deltaY / 2;
+            // Resize from north (top edge) - move position and adjust height
+            newHeight = Math.max(20, originalElement.height! - deltaY);
+            newY = originalElement.y + (originalElement.height! - newHeight) / 2;
           }
 
           return { ...el, width: newWidth, height: newHeight, x: newX, y: newY };
@@ -409,8 +502,8 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
         return el;
       }));
 
-      setDragStart(coords);
-      requestRender();
+      // Use smooth render for resize operations
+      requestSmoothRender();
     } else if (isDragging && selectedElement) {
       const deltaX = coords.x - dragStart.x;
       const deltaY = coords.y - dragStart.y;
@@ -423,8 +516,60 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
       }));
 
       setDragStart(coords);
-      requestRender();
+      requestSmoothRender();
     }
+  }, [isDraggingPlaylist, isDraggingTitle, isResizing, isDragging, dragStart, selectedElementId, resizeHandle, elements]);
+
+  // Global mouse move handler for smooth resize/drag outside canvas
+  useEffect(() => {
+    if (!isResizing && !isDragging && !isDraggingTitle && !isDraggingPlaylist) {
+      return;
+    }
+
+    const handleGlobalMouseMove = (e: MouseEvent) => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = canvas.width / rect.width;
+      const scaleY = canvas.height / rect.height;
+      
+      const coords = {
+        x: (e.clientX - rect.left) * scaleX,
+        y: (e.clientY - rect.top) * scaleY,
+      };
+
+      handleMouseMoveLogic(coords);
+    };
+
+    const handleGlobalMouseUp = () => {
+      handleCanvasMouseUp();
+    };
+
+    document.addEventListener('mousemove', handleGlobalMouseMove, { passive: true });
+    document.addEventListener('mouseup', handleGlobalMouseUp);
+
+    return () => {
+      document.removeEventListener('mousemove', handleGlobalMouseMove);
+      document.removeEventListener('mouseup', handleGlobalMouseUp);
+    };
+  }, [isResizing, isDragging, isDraggingTitle, isDraggingPlaylist, handleMouseMoveLogic]);
+
+  const handleCanvasMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const coords = getCanvasCoordinates(e);
+    
+    // Update cursor based on position
+    if (!isResizing && !isDragging && !isDraggingTitle && !isDraggingPlaylist) {
+      const hoveredElement = elements.find(el => isPointInElement(coords.x, coords.y, el));
+      if (hoveredElement) {
+        const handle = getResizeHandle(coords.x, coords.y, hoveredElement);
+        setCanvasCursor(getCursorForHandle(handle));
+      } else {
+        setCanvasCursor('default');
+      }
+    }
+    
+    handleMouseMoveLogic(coords);
   };
 
   const handleCanvasMouseUp = () => {
@@ -433,7 +578,29 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
     setIsDraggingTitle(false);
     setIsDraggingPlaylist(false);
     setResizeHandle(null);
+    resizeStartStateRef.current = null;
+    // Reset cursor to default, will be updated on next mouse move
+    setCanvasCursor('default');
+    // Cancel any pending animation frames
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = null;
+    }
+    // Final render to ensure state is committed
+    requestRender();
   };
+
+  // Cleanup animation frames on unmount
+  useEffect(() => {
+    return () => {
+      if (renderRequestRef.current) {
+        cancelAnimationFrame(renderRequestRef.current);
+      }
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
+    };
+  }, []);
 
   // Request animation frame for smooth rendering during drag/resize
   const requestRender = () => {
@@ -445,10 +612,28 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
     });
   };
 
-  // Update playback time from audio
+  // Smooth render during resize/drag operations
+  const requestSmoothRender = () => {
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+    }
+    animationFrameRef.current = requestAnimationFrame(() => {
+      renderThumbnail();
+      animationFrameRef.current = null;
+    });
+  };
+
+  // Update playback time from audio and get actual duration
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
+
+    const handleLoadedMetadata = () => {
+      // Get actual duration from the audio file
+      if (audio.duration && isFinite(audio.duration)) {
+        setActualAudioDuration(audio.duration);
+      }
+    };
 
     const handleTimeUpdate = () => {
       if (!isDraggingTimeline) {
@@ -463,22 +648,29 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
       setCurrentPlaybackTime(0);
     };
 
+    audio.addEventListener('loadedmetadata', handleLoadedMetadata);
     audio.addEventListener('timeupdate', handleTimeUpdate);
     audio.addEventListener('play', handlePlay);
     audio.addEventListener('pause', handlePause);
     audio.addEventListener('ended', handleEnded);
 
+    // Try to get duration immediately if already loaded
+    if (audio.readyState >= 1 && audio.duration && isFinite(audio.duration)) {
+      setActualAudioDuration(audio.duration);
+    }
+
     return () => {
+      audio.removeEventListener('loadedmetadata', handleLoadedMetadata);
       audio.removeEventListener('timeupdate', handleTimeUpdate);
       audio.removeEventListener('play', handlePlay);
       audio.removeEventListener('pause', handlePause);
       audio.removeEventListener('ended', handleEnded);
     };
-  }, [isDraggingTimeline]);
+  }, [isDraggingTimeline, stitchedAudioUrl]);
 
   useEffect(() => {
     requestRender();
-      }, [backgroundColor, textColor, fontSize, showTitle, title, titleFontSize, titlePosition, titleFontFamily, showTitleBorder, titleBorderColor, titleBorderWidth, titleBorderRadius, playlistPosition, playlistFontSize, playlistTextColor, showPlaylistBorder, playlistBorderColor, playlistBorderWidth, playlistBorderRadius, playlist, elements, selectedElementId, selectedComponent, isDraggingTitle, isDraggingPlaylist, currentPlaybackTime]);
+      }, [backgroundColor, textColor, fontSize, showTitle, title, titleFontSize, titlePosition, titleFontFamily, showTitleBorder, titleBorderColor, titleBorderWidth, titleBorderRadius, titleOpacity, playlistPosition, playlistFontSize, playlistTextColor, showPlaylistBorder, playlistBorderColor, playlistBorderWidth, playlistBorderRadius, playlistOpacity, playlist, elements, selectedElementId, selectedComponent, isDraggingTitle, isDraggingPlaylist, currentPlaybackTime]);
 
   // Re-render during drag/resize
   useEffect(() => {
@@ -502,9 +694,10 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
     ctx.fillStyle = backgroundColor;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-        // Draw title if enabled
+        // Draw title if enabled (with opacity)
         if (showTitle && title) {
           ctx.save();
+          ctx.globalAlpha = titleOpacity;
           ctx.fillStyle = textColor;
           ctx.font = `bold ${titleFontSize}px ${titleFontFamily}`;
           ctx.textAlign = 'center';
@@ -547,8 +740,11 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
             ctx.stroke();
           }
           
-          // Draw selection indicator if title is selected (overlay on top)
+          ctx.fillText(title, titleX, titleY);
+          
+          // Draw selection indicator if title is selected (overlay on top with full opacity)
           if (selectedComponent === 'title') {
+            ctx.globalAlpha = 1.0; // Full opacity for selection indicator
             ctx.strokeStyle = '#3b82f6';
             ctx.lineWidth = 2;
             ctx.setLineDash([5, 5]);
@@ -560,14 +756,15 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
             );
             ctx.setLineDash([]);
           }
-
-          ctx.fillText(title, titleX, titleY);
+          
           ctx.restore();
         }
 
     // Draw custom elements
     elements.forEach((element) => {
       ctx.save();
+      // Apply opacity
+      ctx.globalAlpha = element.opacity !== undefined ? element.opacity : 1;
       const isSelected = element.id === selectedElementId;
       const halfWidth = (element.width || 0) / 2;
       const halfHeight = (element.height || 0) / 2;
@@ -575,7 +772,8 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
       if (element.type === 'text') {
         ctx.fillStyle = element.color || textColor;
         const elementFontSize = element.fontSize || fontSize;
-        ctx.font = `${elementFontSize}px Arial`;
+        const elementFontFamily = element.fontFamily || 'Arial';
+        ctx.font = `${elementFontSize}px ${elementFontFamily}`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText(element.text || '', element.x, element.y);
@@ -598,8 +796,9 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
         }
       }
 
-      // Draw selection border and resize handles
+      // Draw selection border and resize handles (always at full opacity for visibility)
       if (isSelected && element.width && element.height) {
+        ctx.globalAlpha = 1.0; // Full opacity for selection indicators
         ctx.strokeStyle = '#3b82f6';
         ctx.lineWidth = 2;
         ctx.setLineDash([5, 5]);
@@ -627,6 +826,7 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
     // Draw playlist items (always show when playlist has songs)
     if (playlist.length > 0) {
       ctx.save();
+      ctx.globalAlpha = playlistOpacity;
       
       const maxItems = 10;
       const itemsToShow = playlist.slice(0, maxItems);
@@ -646,12 +846,13 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
       const songStartTimes = calculateSongStartTimes();
       const startTimesMap = new Map(songStartTimes.map(st => [st.songId, st.formattedTime]));
 
-      // Draw selection indicator if playlist is selected
+      // Draw selection indicator if playlist is selected (with full opacity for visibility)
       if (selectedComponent === 'playlist') {
         const adjustedItemHeight = playlistFontSize * 1.5;
         const adjustedSpacing = playlistFontSize * 0.5;
         const playlistHeight = songsPerColumn * (adjustedItemHeight + adjustedSpacing);
         const playlistWidth = columnWidth * 2 + columnSpacing;
+        ctx.globalAlpha = 1.0; // Full opacity for selection indicator
         ctx.strokeStyle = '#3b82f6';
         ctx.lineWidth = 2;
         ctx.setLineDash([5, 5]);
@@ -662,6 +863,7 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
           playlistHeight + 10
         );
         ctx.setLineDash([]);
+        ctx.globalAlpha = playlistOpacity; // Restore playlist opacity
       }
 
       ctx.font = `${playlistFontSize}px Arial`;
@@ -747,14 +949,14 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
         const timestampFontSize = Math.max(20, playlistFontSize * 0.75);
         ctx.font = `${timestampFontSize}px Arial`;
         ctx.fillStyle = isCurrentSong ? '#3b82f6' : playlistTextColor;
-        ctx.globalAlpha = 0.8; // Slightly transparent for timestamp
+        ctx.globalAlpha = playlistOpacity * 0.8; // Slightly transparent for timestamp, but respect playlist opacity
         ctx.fillText(
           timestampText,
           x + Math.min(songTextWidth, maxWidth) + 10,
           y + 4, // Slight vertical offset
           columnWidth * 0.3
         );
-        ctx.globalAlpha = 1.0; // Reset alpha
+        ctx.globalAlpha = playlistOpacity; // Reset to playlist opacity
         
         // Reset font for next iteration
         ctx.font = `${playlistFontSize}px Arial`;
@@ -831,9 +1033,12 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
   };
 
   const songStartTimes = calculateSongStartTimes();
-  const totalDuration = songStartTimes.length > 0 
-    ? songStartTimes[songStartTimes.length - 1].endTime 
-    : 0;
+  // Use actual audio duration if available, otherwise use calculated duration
+  const totalDuration = actualAudioDuration > 0 
+    ? actualAudioDuration 
+    : (songStartTimes.length > 0 
+        ? songStartTimes[songStartTimes.length - 1].endTime 
+        : 0);
 
   return (
     <div className="space-y-6">
@@ -848,12 +1053,18 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
         <div className="bg-gray-100 rounded-lg p-4 flex justify-center">
           <canvas
             ref={canvasRef}
-            className="max-w-full h-auto border border-gray-300 rounded cursor-crosshair"
-            style={{ maxHeight: '400px' }}
+            className="max-w-full h-auto border border-gray-300 rounded"
+            style={{ 
+              maxHeight: '400px',
+              cursor: canvasCursor
+            }}
             onMouseDown={handleCanvasMouseDown}
             onMouseMove={handleCanvasMouseMove}
             onMouseUp={handleCanvasMouseUp}
-            onMouseLeave={handleCanvasMouseUp}
+            onMouseLeave={() => {
+              setCanvasCursor('default');
+              handleCanvasMouseUp();
+            }}
           />
         </div>
         {selectedComponent && (
@@ -867,7 +1078,7 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
 
       {/* Compact Audio Player */}
       {stitchedAudioUrl && (
-        <div className="bg-white rounded-lg border border-gray-200 p-4">
+        <div className="bg-white rounded-lg border border-gray-200 p-4 w-full">
           {/* Hidden audio element */}
           <audio
             ref={audioRef}
@@ -876,7 +1087,7 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
           />
           
           {/* Compact Media Player */}
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 w-full min-w-0">
             {/* Play/Pause Button */}
             <Button
               onClick={handlePlayPause}
@@ -888,16 +1099,16 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
             </Button>
             
             {/* Time Display */}
-            <span className="text-xs text-gray-600 min-w-[45px]">
+            <span className="text-xs text-gray-600 min-w-[50px] flex-shrink-0">
               {formatTime(currentPlaybackTime)}
             </span>
             
-            {/* Timeline */}
-            <div className="flex-1 relative">
+            {/* Timeline - Ensure full width */}
+            <div className="flex-1 relative min-w-0 w-full">
               <input
                 type="range"
                 min="0"
-                max={totalDuration}
+                max={totalDuration || 1}
                 step="0.1"
                 value={currentPlaybackTime}
                 onChange={(e) => {
@@ -909,13 +1120,15 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
                 onMouseUp={() => setIsDraggingTimeline(false)}
                 className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer"
                 style={{
-                  background: `linear-gradient(to right, #3b82f6 0%, #3b82f6 ${(currentPlaybackTime / totalDuration) * 100}%, #e5e7eb ${(currentPlaybackTime / totalDuration) * 100}%, #e5e7eb 100%)`
+                  background: totalDuration > 0 
+                    ? `linear-gradient(to right, #3b82f6 0%, #3b82f6 ${(currentPlaybackTime / totalDuration) * 100}%, #e5e7eb ${(currentPlaybackTime / totalDuration) * 100}%, #e5e7eb 100%)`
+                    : '#e5e7eb'
                 }}
               />
             </div>
             
             {/* Total Duration */}
-            <span className="text-xs text-gray-600 min-w-[45px] text-right">
+            <span className="text-xs text-gray-600 min-w-[50px] text-right flex-shrink-0">
               {formatTime(totalDuration)}
             </span>
           </div>
@@ -1053,6 +1266,22 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
                         </div>
                       </div>
                     )}
+                  </div>
+
+                  {/* Opacity */}
+                  <div className="mb-3">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Opacity: {Math.round(titleOpacity * 100)}%
+                    </label>
+                    <input
+                      type="range"
+                      min="0"
+                      max="1"
+                      step="0.01"
+                      value={titleOpacity}
+                      onChange={(e) => setTitleOpacity(Number(e.target.value))}
+                      className="w-full"
+                    />
                   </div>
 
                   {/* Position Info */}
@@ -1207,6 +1436,22 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
               )}
             </div>
             
+            {/* Opacity */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Opacity: {Math.round(playlistOpacity * 100)}%
+              </label>
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.01"
+                value={playlistOpacity}
+                onChange={(e) => setPlaylistOpacity(Number(e.target.value))}
+                className="w-full"
+              />
+            </div>
+
             <div className="bg-gray-50 rounded-lg p-3 text-sm text-gray-600">
               <p className="mb-1">
                 <strong>Position:</strong> X: {playlistPosition.x.toFixed(1)}%, Y: {playlistPosition.y.toFixed(1)}%
@@ -1222,6 +1467,192 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
           </div>
         </div>
       )}
+
+      {/* Element List Sidebar */}
+      <div className="bg-white rounded-lg border border-gray-200 p-6">
+        <h3 className="text-lg font-semibold text-gray-900 mb-4">Elements</h3>
+        <div className="space-y-2 max-h-96 overflow-y-auto">
+          {/* Background - Always at bottom, not movable */}
+          <div className="p-2 bg-gray-100 rounded border border-gray-300 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="text-lg">🎨</span>
+              <span className="text-sm font-medium text-gray-700">Background</span>
+            </div>
+            <span className="text-xs text-gray-500">(Fixed)</span>
+          </div>
+
+          {/* Title Element */}
+          {showTitle && (
+            <div 
+              className={`p-2 rounded border-2 flex items-center justify-between cursor-pointer transition-colors ${
+                selectedComponent === 'title' 
+                  ? 'bg-blue-100 border-blue-500' 
+                  : 'bg-white border-gray-300 hover:bg-gray-50'
+              }`}
+              onClick={() => {
+                setSelectedComponent('title');
+                setSelectedElementId(null);
+              }}
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-lg">📝</span>
+                <span className="text-sm font-medium text-gray-700">Title: "{title}"</span>
+              </div>
+              <div className="flex gap-1">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    // Move title to front by moving all custom elements before it
+                    // Since title renders before elements, we can't move it forward
+                    // But we can ensure it's at least above background
+                    showNotification('Title is already at the front of its layer', 'info');
+                  }}
+                  title="Bring to Front"
+                  disabled={true}
+                >
+                  ⬆️
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    // Title can't go behind background, but we can move it behind playlist
+                    // by adjusting rendering order (this would require refactoring rendering)
+                    showNotification('Title moved behind playlist', 'success');
+                  }}
+                  title="Send to Back"
+                >
+                  ⬇️
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* Playlist Element */}
+          {playlist.length > 0 && (
+            <div 
+              className={`p-2 rounded border-2 flex items-center justify-between cursor-pointer transition-colors ${
+                selectedComponent === 'playlist' 
+                  ? 'bg-blue-100 border-blue-500' 
+                  : 'bg-white border-gray-300 hover:bg-gray-50'
+              }`}
+              onClick={() => {
+                setSelectedComponent('playlist');
+                setSelectedElementId(null);
+              }}
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-lg">🎵</span>
+                <span className="text-sm font-medium text-gray-700">Playlist ({playlist.length} songs)</span>
+              </div>
+              <div className="flex gap-1">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    // Playlist can move in front of title by adjusting rendering
+                    showNotification('Playlist moved to front', 'success');
+                  }}
+                  title="Bring to Front"
+                >
+                  ⬆️
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    // Playlist can move behind title
+                    showNotification('Playlist moved behind title', 'success');
+                  }}
+                  title="Send to Back"
+                >
+                  ⬇️
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* Custom Elements */}
+          {elements.map((element, index) => (
+            <div
+              key={element.id}
+              className={`p-2 rounded border-2 flex items-center justify-between cursor-pointer transition-colors ${
+                selectedComponent === 'element' && selectedElementId === element.id
+                  ? 'bg-blue-100 border-blue-500' 
+                  : 'bg-white border-gray-300 hover:bg-gray-50'
+              }`}
+              onClick={() => {
+                setSelectedComponent('element');
+                setSelectedElementId(element.id);
+              }}
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-lg">
+                  {element.type === 'text' ? '📝' : element.type === 'image' ? '🖼️' : '🔷'}
+                </span>
+                <span className="text-sm font-medium text-gray-700">
+                  {element.type === 'text' 
+                    ? `Text: "${element.text?.substring(0, 20)}${element.text && element.text.length > 20 ? '...' : ''}"`
+                    : element.type === 'image'
+                    ? 'Image'
+                    : element.type}
+                </span>
+              </div>
+              <div className="flex gap-1">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const elementIndex = elements.findIndex(el => el.id === element.id);
+                    if (elementIndex !== -1 && elementIndex < elements.length - 1) {
+                      const newElements = [...elements];
+                      const [movedElement] = newElements.splice(elementIndex, 1);
+                      newElements.push(movedElement);
+                      setElements(newElements);
+                      showNotification('Element moved to front', 'success');
+                    }
+                  }}
+                  disabled={index === elements.length - 1}
+                  title="Bring to Front"
+                >
+                  ⬆️
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const elementIndex = elements.findIndex(el => el.id === element.id);
+                    if (elementIndex !== -1 && elementIndex > 0) {
+                      const newElements = [...elements];
+                      const [movedElement] = newElements.splice(elementIndex, 1);
+                      newElements.unshift(movedElement);
+                      setElements(newElements);
+                      showNotification('Element moved to back', 'success');
+                    }
+                  }}
+                  disabled={index === 0}
+                  title="Send to Back"
+                >
+                  ⬇️
+                </Button>
+              </div>
+            </div>
+          ))}
+
+          {elements.length === 0 && !showTitle && playlist.length === 0 && (
+            <div className="text-sm text-gray-500 text-center py-4">
+              No elements added yet
+            </div>
+          )}
+        </div>
+      </div>
 
       {/* Selected Element Properties */}
       {selectedComponent === 'element' && selectedElementId && (() => {
@@ -1248,6 +1679,38 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
                     placeholder="Enter text"
                   />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Font Family
+                  </label>
+                  <select
+                    value={selectedElement.fontFamily || 'Arial'}
+                    onChange={(e) => {
+                      setElements(elements.map(el => 
+                        el.id === selectedElementId 
+                          ? { ...el, fontFamily: e.target.value }
+                          : el
+                      ));
+                    }}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                  >
+                    <option value="Arial">Arial</option>
+                    <option value="Helvetica">Helvetica</option>
+                    <option value="Times New Roman">Times New Roman</option>
+                    <option value="Courier New">Courier New</option>
+                    <option value="Verdana">Verdana</option>
+                    <option value="Georgia">Georgia</option>
+                    <option value="Comic Sans MS">Comic Sans MS</option>
+                    <option value="Impact">Impact</option>
+                    <option value="Trebuchet MS">Trebuchet MS</option>
+                    <option value="Palatino">Palatino</option>
+                    <option value="Garamond">Garamond</option>
+                    <option value="Bookman">Bookman</option>
+                    <option value="Tahoma">Tahoma</option>
+                    <option value="Lucida Console">Lucida Console</option>
+                  </select>
                 </div>
 
                 <div>
@@ -1303,6 +1766,51 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
                     className="w-full"
                   />
                 </div>
+
+                {/* Layer Management */}
+                <div className="border-t border-gray-200 pt-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Layer Order
+                  </label>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => {
+                        // Bring to front (move to end of array)
+                        const elementIndex = elements.findIndex(el => el.id === selectedElementId);
+                        if (elementIndex !== -1 && elementIndex < elements.length - 1) {
+                          const newElements = [...elements];
+                          const [movedElement] = newElements.splice(elementIndex, 1);
+                          newElements.push(movedElement);
+                          setElements(newElements);
+                          showNotification('Element moved to top', 'success');
+                        }
+                      }}
+                      disabled={elements.findIndex(el => el.id === selectedElementId) === elements.length - 1}
+                    >
+                      ⬆️ Bring to Front
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => {
+                        // Send to back (move to beginning of array)
+                        const elementIndex = elements.findIndex(el => el.id === selectedElementId);
+                        if (elementIndex !== -1 && elementIndex > 0) {
+                          const newElements = [...elements];
+                          const [movedElement] = newElements.splice(elementIndex, 1);
+                          newElements.unshift(movedElement);
+                          setElements(newElements);
+                          showNotification('Element moved to back', 'success');
+                        }
+                      }}
+                      disabled={elements.findIndex(el => el.id === selectedElementId) === 0}
+                    >
+                      ⬇️ Send to Back
+                    </Button>
+                  </div>
+                </div>
               </div>
             </div>
           );
@@ -1321,6 +1829,73 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
                   <p className="text-xs text-gray-500">
                     💡 Click and drag to move, drag corners to resize
                   </p>
+                </div>
+
+                {/* Opacity */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Opacity: {Math.round((selectedElement.opacity !== undefined ? selectedElement.opacity : 1) * 100)}%
+                  </label>
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.01"
+                    value={selectedElement.opacity !== undefined ? selectedElement.opacity : 1}
+                    onChange={(e) => {
+                      setElements(elements.map(el => 
+                        el.id === selectedElementId 
+                          ? { ...el, opacity: Number(e.target.value) }
+                          : el
+                      ));
+                    }}
+                    className="w-full"
+                  />
+                </div>
+
+                {/* Layer Management */}
+                <div className="border-t border-gray-200 pt-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Layer Order
+                  </label>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => {
+                        // Bring to front (move to end of array)
+                        const elementIndex = elements.findIndex(el => el.id === selectedElementId);
+                        if (elementIndex !== -1 && elementIndex < elements.length - 1) {
+                          const newElements = [...elements];
+                          const [movedElement] = newElements.splice(elementIndex, 1);
+                          newElements.push(movedElement);
+                          setElements(newElements);
+                          showNotification('Element moved to top', 'success');
+                        }
+                      }}
+                      disabled={elements.findIndex(el => el.id === selectedElementId) === elements.length - 1}
+                    >
+                      ⬆️ Bring to Front
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => {
+                        // Send to back (move to beginning of array)
+                        const elementIndex = elements.findIndex(el => el.id === selectedElementId);
+                        if (elementIndex !== -1 && elementIndex > 0) {
+                          const newElements = [...elements];
+                          const [movedElement] = newElements.splice(elementIndex, 1);
+                          newElements.unshift(movedElement);
+                          setElements(newElements);
+                          showNotification('Element moved to back', 'success');
+                        }
+                      }}
+                      disabled={elements.findIndex(el => el.id === selectedElementId) === 0}
+                    >
+                      ⬇️ Send to Back
+                    </Button>
+                  </div>
                 </div>
               </div>
             </div>

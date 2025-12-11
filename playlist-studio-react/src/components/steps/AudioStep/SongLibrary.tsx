@@ -11,7 +11,7 @@ import { validateAudioUrl, isYouTubeUrl, isSunoUrl, convertGoogleDriveUrl } from
 import { audioExtractionService } from '@/services/audioExtractionService';
 
 export const SongLibrary: React.FC = () => {
-  const { playlist, removeSong, reorderSongs, setCurrentStep } = usePlaylist();
+  const { playlist, addSong, removeSong, reorderSongs, setCurrentStep } = usePlaylist();
   const { showNotification } = useNotifications();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingSong, setEditingSong] = useState<Song | null>(null);
@@ -20,13 +20,153 @@ export const SongLibrary: React.FC = () => {
   const [showFeedbackPopup, setShowFeedbackPopup] = useState(false);
   const [pauseTimestamp, setPauseTimestamp] = useState<{ songIndex: number; timestamp: number } | null>(null);
   const [extractingAudioId, setExtractingAudioId] = useState<string | null>(null);
+  const [extractingSongName, setExtractingSongName] = useState<string | null>(null);
+  const [showAddMenu, setShowAddMenu] = useState(false);
+  const addMenuRef = useRef<HTMLDivElement>(null);
+  const csvFileInputRef = useRef<HTMLInputElement>(null);
   const audioRefs = useRef<Map<string, HTMLAudioElement>>(new Map());
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const wasPlayingRef = useRef(false);
 
-  const handleAddSong = () => {
+  // Close menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (addMenuRef.current && !addMenuRef.current.contains(event.target as Node)) {
+        setShowAddMenu(false);
+      }
+    };
+
+    if (showAddMenu) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [showAddMenu]);
+
+  const handleAddSong = (method: 'link' | 'csv' | 'device') => {
+    setShowAddMenu(false);
     setEditingSong(null);
-    setIsModalOpen(true);
+    
+    if (method === 'link') {
+      setIsModalOpen(true);
+    } else if (method === 'csv') {
+      csvFileInputRef.current?.click();
+    } else if (method === 'device') {
+      // Trigger file input for device files
+      const fileInput = document.createElement('input');
+      fileInput.type = 'file';
+      fileInput.accept = 'audio/*';
+      fileInput.multiple = true;
+      fileInput.onchange = (e) => {
+        const files = (e.target as HTMLInputElement).files;
+        if (files && files.length > 0) {
+          handleDeviceFileUpload(files);
+        }
+      };
+      fileInput.click();
+    }
+  };
+
+  const handleDeviceFileUpload = (files: FileList) => {
+    const fileArray = Array.from(files);
+    const audioFiles = fileArray.filter(file => file.type.startsWith('audio/'));
+
+    if (audioFiles.length === 0) {
+      showNotification('Please select audio files only (MP3, WAV, M4A, etc.)', 'warning');
+      return;
+    }
+
+    audioFiles.forEach((file) => {
+      const objectUrl = URL.createObjectURL(file);
+      const fileName = file.name;
+      const title = fileName.replace(/\.[^/.]+$/, '');
+      
+      // Add song with object URL
+      addSong({
+        title: title,
+        url: objectUrl,
+      });
+    });
+
+    showNotification(`✅ Added ${audioFiles.length} song${audioFiles.length !== 1 ? 's' : ''} from device`, 'success');
+  };
+
+  const handleCSVUpload = async (file: File) => {
+    try {
+      const XLSX = await import('xlsx');
+      const arrayBuffer = await file.arrayBuffer();
+      const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+      const firstSheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[firstSheetName];
+      const data = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[][];
+
+      let addedCount = 0;
+      for (let i = 0; i < data.length; i++) {
+        const row = data[i];
+        if (!row || row.length === 0) continue;
+
+        // Support multiple formats:
+        // Format 1: [Title, URL, Artist, Duration, ...]
+        // Format 2: [Title | URL]
+        // Format 3: Just [Title] or [URL]
+        let title = '';
+        let url = '';
+        let artist = '';
+        let duration = '';
+
+        if (row.length === 1) {
+          const cell = String(row[0] || '').trim();
+          if (cell.includes('|')) {
+            const parts = cell.split('|').map(s => s.trim());
+            title = parts[0] || '';
+            url = parts[1] || '';
+          } else if (cell.startsWith('http')) {
+            url = cell;
+            title = `Song ${addedCount + 1}`;
+          } else {
+            title = cell;
+          }
+        } else {
+          title = String(row[0] || '').trim();
+          url = String(row[1] || '').trim();
+          artist = String(row[2] || '').trim();
+          duration = String(row[3] || '').trim();
+        }
+
+        if (!title && !url) continue;
+
+        // If it's a YouTube or Suno URL, extract audio
+        if (url && (isYouTubeUrl(url) || isSunoUrl(url))) {
+          const songId = `temp-${Date.now()}-${i}`;
+          setExtractingAudioId(songId);
+          setExtractingSongName(title || url);
+          
+          try {
+            const extractionResult = await audioExtractionService.extractAudioFromYouTube(url);
+            url = extractionResult.audioUrl;
+            title = extractionResult.title || title || `Song ${addedCount + 1}`;
+            showNotification(`✅ Extracted: ${title}`, 'success');
+          } catch (error: any) {
+            showNotification(`⚠️ Failed to extract "${title || url}": ${error.message}`, 'warning');
+            continue;
+          } finally {
+            setExtractingAudioId(null);
+            setExtractingSongName(null);
+          }
+        }
+
+        addSong({
+          title: title || `Song ${addedCount + 1}`,
+          url: url || undefined,
+          artist: artist || undefined,
+          duration: duration || undefined,
+        });
+        addedCount++;
+      }
+
+      showNotification(`✅ Added ${addedCount} song${addedCount !== 1 ? 's' : ''} from ${file.name}`, 'success');
+    } catch (error: any) {
+      showNotification(`❌ Failed to read ${file.name}: ${error.message}`, 'error');
+    }
   };
 
   const handleEditSong = (song: Song) => {
@@ -177,7 +317,8 @@ export const SongLibrary: React.FC = () => {
       // Check if it's a YouTube or Suno URL - extract audio automatically
       if (isYouTubeUrl(audioUrl) || isSunoUrl(audioUrl)) {
         setExtractingAudioId(song.id);
-        showNotification('🎵 Extracting audio from link... This may take a moment.', 'info');
+        setExtractingSongName(song.title);
+        showNotification(`🎵 Extracting audio for "${song.title}"... This may take a moment.`, 'info');
         
         try {
           const extractionResult = await audioExtractionService.extractAudioFromYouTube(audioUrl);
@@ -189,14 +330,16 @@ export const SongLibrary: React.FC = () => {
           showNotification(`✅ Audio extracted: ${extractionResult.title}`, 'success');
         } catch (error: any) {
           showNotification(
-            `❌ Failed to extract audio: ${error.message}. Please try again or use a direct audio URL.`,
+            `❌ Failed to extract audio for "${song.title}": ${error.message}. Please try again or use a direct audio URL.`,
             'error',
             8000
           );
           setExtractingAudioId(null);
+          setExtractingSongName(null);
           return;
         } finally {
           setExtractingAudioId(null);
+          setExtractingSongName(null);
         }
       }
 
@@ -394,7 +537,46 @@ export const SongLibrary: React.FC = () => {
           <Button variant="secondary" onClick={handleStartReview}>
             🎵 Start Review
           </Button>
-          <Button onClick={handleAddSong}>Add Song</Button>
+          <div className="relative" ref={addMenuRef}>
+            <Button onClick={() => setShowAddMenu(!showAddMenu)}>
+              Add Song {showAddMenu ? '▲' : '▼'}
+            </Button>
+            {showAddMenu && (
+<div className="absolute right-0 mt-1 w-48 bg-white border border-gray-200 rounded-md shadow-lg z-50 overflow-visible max-h-none">
+                <button
+                  onClick={() => handleAddSong('link')}
+                  className="w-full text-left px-4 py-2 text-sm hover:bg-gray-100 first:rounded-t-md"
+                >
+                  1️⃣ Add Song from Link
+                </button>
+                <button
+                  onClick={() => handleAddSong('csv')}
+                  className="w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
+                >
+                  2️⃣ Add Songs from CSV/Excel
+                </button>
+                <button
+                  onClick={() => handleAddSong('device')}
+                  className="w-full text-left px-4 py-2 text-sm hover:bg-gray-100 last:rounded-b-md"
+                >
+                  3️⃣ Add Songs from Device
+                </button>
+              </div>
+            )}
+            <input
+              ref={csvFileInputRef}
+              type="file"
+              accept=".csv,.xlsx,.xls"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) {
+                  handleCSVUpload(file);
+                }
+                e.target.value = '';
+              }}
+            />
+          </div>
         </div>
       </div>
       <div className="space-y-2">
@@ -432,7 +614,14 @@ export const SongLibrary: React.FC = () => {
                   }}
                 />
               )}
-              <h3 className="font-medium">{song.title}</h3>
+              <h3 className="font-medium">
+                {song.title}
+                {extractingAudioId === song.id && extractingSongName && (
+                  <span className="ml-2 text-xs text-blue-600 font-normal">
+                    (Extracting: {extractingSongName})
+                  </span>
+                )}
+              </h3>
               {song.artist && <p className="text-sm text-gray-600">{song.artist}</p>}
               {song.duration && <p className="text-sm text-gray-500">{song.duration}</p>}
             </div>
@@ -442,9 +631,9 @@ export const SongLibrary: React.FC = () => {
                   size="sm"
                   variant="secondary"
                   disabled
-                  title="Extracting audio..."
+                  title={`Extracting audio for "${extractingSongName || song.title}"...`}
                 >
-                  ⏳
+                  ⏳ Extracting...
                 </Button>
               ) : (
                 song.url && (

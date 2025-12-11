@@ -734,7 +734,9 @@ Another Song | https://url4.mp3`}
             Cancel
           </Button>
           <Button type="submit" disabled={extractingAudio === -1}>
-            {extractingAudio === -1 ? 'Extracting...' : (song ? 'Update Song' : 'Add Song')}
+            {extractingAudio === -1 
+              ? `Extracting "${formData.title || 'audio'}"...` 
+              : (song ? 'Update Song' : 'Add Song')}
           </Button>
         </div>
       </form>
@@ -766,7 +768,7 @@ Another Song | https://url4.mp3`}
                     <div className="flex items-center gap-2 ml-2">
                       {extractingAudio === index ? (
                         <span className="px-2 py-1 text-xs bg-blue-100 text-blue-800 rounded animate-pulse">
-                          Extracting...
+                          Extracting "{previewSong.title}"...
                         </span>
                       ) : (
                         <>

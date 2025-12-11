@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { usePlaylist } from '@/context/PlaylistContext';
-import { Song, Feedback } from '@/types';
+import { Feedback } from '@/types';
 
 interface TimelineSong {
   id: string;
@@ -17,7 +17,8 @@ interface TimelineProps {
 
 export const Timeline: React.FC<TimelineProps> = ({ currentTime = 0, playingSongId = null }) => {
   const { playlist, feedback, reorderSongs } = usePlaylist();
-  const [draggedSong, setDraggedSong] = useState<Song | null>(null);
+  const [draggedSongIndex, setDraggedSongIndex] = useState<number>(-1);
+  const [dropIndicatorIndex, setDropIndicatorIndex] = useState<number>(-1);
   const [hoveredFeedback, setHoveredFeedback] = useState<Feedback | null>(null);
   const [tooltipPosition, setTooltipPosition] = useState<{ x: number; y: number } | null>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
@@ -46,25 +47,137 @@ export const Timeline: React.FC<TimelineProps> = ({ currentTime = 0, playingSong
   const totalDuration = accumulatedTime || timelineSongs.length * 180;
   const pixelsPerSecond = 200 / 60; // 200px per minute
 
-  const handleDragStart = (e: React.DragEvent, song: TimelineSong) => {
-    setDraggedSong(playlist.find(s => s.id === song.id) || null);
-    e.dataTransfer.effectAllowed = 'move';
+  // Calculate which index to drop at based on mouse X position
+  const calculateDropIndex = (clientX: number): number => {
+    if (!timelineRef.current || timelineSongs.length === 0) return -1;
+    
+    const rect = timelineRef.current.getBoundingClientRect();
+    const x = clientX - rect.left;
+    
+    // If before the first song, drop at index 0
+    if (x < timelineSongs[0].startTime * pixelsPerSecond) {
+      return 0;
+    }
+    
+    // If after the last song, drop at the end
+    const lastSong = timelineSongs[timelineSongs.length - 1];
+    if (x >= lastSong.endTime * pixelsPerSecond) {
+      return timelineSongs.length;
+    }
+    
+    // Find which song we're over or between
+    for (let i = 0; i < timelineSongs.length; i++) {
+      const song = timelineSongs[i];
+      const songLeft = song.startTime * pixelsPerSecond;
+      const songRight = song.endTime * pixelsPerSecond;
+      const songCenter = (songLeft + songRight) / 2;
+      
+      // If we're within this song's bounds
+      if (x >= songLeft && x < songRight) {
+        // If before the center, drop before this song (at index i)
+        // If after the center, drop after this song (at index i + 1)
+        return x < songCenter ? i : i + 1;
+      }
+      
+      // If between this song and the next
+      if (i < timelineSongs.length - 1) {
+        const nextSong = timelineSongs[i + 1];
+        const nextSongLeft = nextSong.startTime * pixelsPerSecond;
+        
+        if (x >= songRight && x < nextSongLeft) {
+          // Between songs - drop after current (at index i + 1)
+          return i + 1;
+        }
+      }
+    }
+    
+    return timelineSongs.length;
   };
 
-  const handleDragOver = (e: React.DragEvent) => {
+  const handleDragStart = (e: React.DragEvent, song: TimelineSong, index: number) => {
+    setDraggedSongIndex(index);
+    setDropIndicatorIndex(-1);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', song.id);
+    // Set a drag image to make it clearer
+    if (e.dataTransfer.setDragImage && e.currentTarget instanceof HTMLElement) {
+      e.dataTransfer.setDragImage(e.currentTarget, 0, 0);
+    }
+    // Make the dragged element semi-transparent
+    if (e.currentTarget instanceof HTMLElement) {
+      e.currentTarget.style.opacity = '0.5';
+    }
+  };
+
+  const handleDragEnd = (e: React.DragEvent) => {
+    // Reset opacity
+    if (e.currentTarget instanceof HTMLElement) {
+      e.currentTarget.style.opacity = '1';
+    }
+    setDraggedSongIndex(-1);
+    setDropIndicatorIndex(-1);
+  };
+
+  const handleContainerDragOver = (e: React.DragEvent) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
+    
+    if (draggedSongIndex === -1) return;
+    
+    const dropIndex = calculateDropIndex(e.clientX);
+    if (dropIndex !== -1) {
+      setDropIndicatorIndex(dropIndex);
+    }
   };
 
-  const handleDrop = (e: React.DragEvent, targetIndex: number) => {
+  const handleContainerDrop = (e: React.DragEvent) => {
     e.preventDefault();
-    if (!draggedSong) return;
-
-    const draggedIndex = playlist.findIndex(song => song.id === draggedSong.id);
-    if (draggedIndex !== -1 && draggedIndex !== targetIndex) {
-      reorderSongs(draggedIndex, targetIndex);
+    e.stopPropagation();
+    
+    if (draggedSongIndex === -1) {
+      setDraggedSongIndex(-1);
+      setDropIndicatorIndex(-1);
+      return;
     }
-    setDraggedSong(null);
+
+    // If drop indicator wasn't set, calculate it now
+    let targetIndex = dropIndicatorIndex;
+    if (targetIndex === -1) {
+      targetIndex = calculateDropIndex(e.clientX);
+    }
+    
+    if (targetIndex === -1 || targetIndex < 0) {
+      setDraggedSongIndex(-1);
+      setDropIndicatorIndex(-1);
+      return;
+    }
+    
+    // Adjust target index when dragging forward
+    // When you remove an item from index i, items after it shift down by 1
+    // So if dragging from index 2 to index 5, we actually want index 4 after removal
+    if (draggedSongIndex < targetIndex) {
+      targetIndex = targetIndex - 1;
+    }
+    
+    // Clamp target index to valid range
+    targetIndex = Math.max(0, Math.min(targetIndex, playlist.length - 1));
+
+    if (draggedSongIndex !== targetIndex && draggedSongIndex >= 0 && targetIndex >= 0) {
+      reorderSongs(draggedSongIndex, targetIndex);
+    }
+    
+    setDraggedSongIndex(-1);
+    setDropIndicatorIndex(-1);
+  };
+
+  const handleContainerDragLeave = (e: React.DragEvent) => {
+    // Only clear indicator if we're actually leaving the container
+    // Check if we're moving to a child element (which is fine) vs leaving entirely
+    const relatedTarget = e.relatedTarget as Node;
+    if (relatedTarget && timelineRef.current && !timelineRef.current.contains(relatedTarget)) {
+      // Only clear if we're truly leaving the container
+      setDropIndicatorIndex(-1);
+    }
   };
 
   const formatTime = (seconds: number): string => {
@@ -115,6 +228,9 @@ export const Timeline: React.FC<TimelineProps> = ({ currentTime = 0, playingSong
           ref={timelineRef}
           className="relative bg-white border rounded min-h-[200px] overflow-x-auto"
           style={{ width: '100%', minWidth: `${totalDuration * pixelsPerSecond}px` }}
+          onDragOver={handleContainerDragOver}
+          onDrop={handleContainerDrop}
+          onDragLeave={handleContainerDragLeave}
         >
           {/* Time markers */}
           <div className="absolute top-0 left-0 right-0 h-8 border-b bg-gray-50">
@@ -197,23 +313,62 @@ export const Timeline: React.FC<TimelineProps> = ({ currentTime = 0, playingSong
             </div>
           )}
 
+          {/* Drop Indicator */}
+          {dropIndicatorIndex >= 0 && dropIndicatorIndex <= timelineSongs.length && draggedSongIndex !== dropIndicatorIndex && (
+            <div
+              className="absolute top-8 w-1 bg-blue-600 z-40 pointer-events-none animate-pulse"
+              style={{
+                left: (() => {
+                  if (dropIndicatorIndex === 0) {
+                    return '0px';
+                  } else if (dropIndicatorIndex < timelineSongs.length) {
+                    // Show between previous song and current song
+                    const prevSong = timelineSongs[dropIndicatorIndex - 1];
+                    return `${prevSong.endTime * pixelsPerSecond}px`;
+                  } else {
+                    // Show after last song
+                    return `${totalDuration * pixelsPerSecond}px`;
+                  }
+                })(),
+                height: '64px',
+              }}
+            >
+              <div className="absolute -top-2 -left-2 w-5 h-5 bg-blue-600 rounded-full border-2 border-white shadow-md"></div>
+            </div>
+          )}
+
           {/* Songs */}
           <div className="pt-8">
             {timelineSongs.map((song, index) => {
               const isPlaying = playingSongId === song.id;
+              const isDragging = draggedSongIndex === index;
               return (
                 <div
                   key={song.id}
                   draggable
-                  onDragStart={(e) => handleDragStart(e, song)}
-                  onDragOver={handleDragOver}
-                  onDrop={(e) => handleDrop(e, index)}
-                  className={`absolute top-8 h-16 text-white rounded cursor-move flex items-center px-3 transition-colors ${
+                  onDragStart={(e) => handleDragStart(e, song, index)}
+                  onDragEnd={handleDragEnd}
+                  onDragOver={(e) => {
+                    // Allow drop on this element, but let event bubble to container
+                    if (draggedSongIndex >= 0 && draggedSongIndex !== index) {
+                      e.preventDefault();
+                      // Don't stop propagation - let container handle the positioning
+                    }
+                  }}
+                  onDrop={(e) => {
+                    // Prevent drop on individual songs - let container handle it
+                    e.preventDefault();
+                    e.stopPropagation();
+                  }}
+                  className={`absolute top-8 h-16 text-white rounded cursor-move flex items-center px-3 transition-all ${
+                    isDragging ? 'opacity-50 scale-95' : 'opacity-100'
+                  } ${
                     isPlaying ? 'bg-green-500 hover:bg-green-600' : 'bg-blue-500 hover:bg-blue-600'
                   }`}
                   style={{
                     left: `${song.startTime * pixelsPerSecond}px`,
                     width: `${(song.endTime - song.startTime) * pixelsPerSecond}px`,
+                    zIndex: isDragging ? 50 : 20,
                   }}
                 >
                   <div className="flex-1 min-w-0">

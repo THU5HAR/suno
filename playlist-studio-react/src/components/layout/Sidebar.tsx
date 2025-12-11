@@ -26,10 +26,6 @@ const Sidebar: React.FC = () => {
                 <div className="tool-icon">➕</div>
                 <div className="tool-text">Add Songs</div>
               </button>
-              <button className="tool-item">
-                <div className="tool-icon">📊</div>
-                <div className="tool-text">Upload Excel</div>
-              </button>
             </div>
 
             <div>
