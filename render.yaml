@@ -16,7 +16,7 @@ services:
       - key: DATABASE_PATH
         value: ./data/playlist-studio.db
       - key: ALLOWED_ORIGINS
-        value: https://suno-rho.vercel.app,https://music-video-gen.onrender.com,http://localhost:5173,http://localhost:3000
+        value: https://thu5har.github.io,https://suno-rho.vercel.app,https://music-video-gen.onrender.com,http://localhost:5173,http://localhost:3000
       - key: MAX_FILE_SIZE
         value: 104857600
       - key: UPLOAD_DIR

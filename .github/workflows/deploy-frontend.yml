@@ -1,0 +1,47 @@
+name: Deploy Frontend to GitHub Pages
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: playlist-studio-react/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ./playlist-studio-react
+        run: npm ci
+
+      - name: Build
+        working-directory: ./playlist-studio-react
+        run: npm run build
+        env:
+          # This should be set in restricted variables or environment secrets if sensitive,
+          # but for public APIs or non-sensitive, we can set it here or ask user to set it.
+          # For now, we will assume the user needs to set VITE_API_BASE_URL in repository secrets
+          # or we can hardcode the Render URL if known, but better to use secrets.
+          # We'll rely on the .env handling or VOTE_ vars.
+          # However, since the user asked about connecting to backend, we should probably set it.
+          # We don't know the exact Render URL yet until they create it.
+          # We will default to a placeholder or assume they set it up in secrets.
+          VITE_API_BASE_URL: ${{ secrets.VITE_API_BASE_URL }}
+
+      - name: Deploy to GitHub Pages
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          folder: playlist-studio-react/dist
+          branch: gh-pages
