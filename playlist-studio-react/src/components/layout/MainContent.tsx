@@ -30,7 +30,7 @@ const StitchedAudioPreview: React.FC = () => {
 const MainContent: React.FC = () => {
   const { currentStep } = usePlaylist();
   const videoEditorRef = useRef<VideoEditorRef>(null);
-  
+
   // Expose videoEditorRef to window for sidebar access (temporary solution)
   // In a real app, you'd use a context or state management
   useEffect(() => {
@@ -96,12 +96,15 @@ const MainContent: React.FC = () => {
               </p>
             </div>
 
-            <VideoEditor 
-              ref={videoEditorRef} 
+            <VideoEditor
+              ref={videoEditorRef}
               onThumbnailChange={(thumbnailUrl) => {
                 // Store thumbnail data for review step
                 if (typeof window !== 'undefined') {
-                  (window as any).thumbnailData = thumbnailUrl;
+                  (window as any).thumbnailSettings = {
+                    thumbnailUrl: thumbnailUrl,
+                    playlistPosition: { x: 50, y: 50 } // Default position if not tracked
+                  };
                 }
               }}
             />
