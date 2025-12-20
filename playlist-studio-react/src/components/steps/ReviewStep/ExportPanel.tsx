@@ -159,11 +159,14 @@ export const ExportPanel: React.FC = () => {
       // -pix_fmt yuv420p: ensure compatibility
       await ffmpeg.exec([
         '-loop', '1',
+        '-r', '1', // Set frame rate to 1 fps for static image (huge speedup)
         '-i', 'thumbnail.png',
         '-i', 'audio.wav',
         '-c:v', 'libx264',
         '-tune', 'stillimage',
+        '-preset', 'ultrafast', // Use fastest encoding speed
         '-c:a', 'aac',
+        '-b:a', '192k', // Reasonable audio quality
         '-shortest',
         '-pix_fmt', 'yuv420p',
         '-y',
