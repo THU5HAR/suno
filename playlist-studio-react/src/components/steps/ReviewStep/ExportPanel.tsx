@@ -28,7 +28,7 @@ export const ExportPanel: React.FC = () => {
         song.duration || '',
         song.url || ''
       ]);
-      
+
       const csvContent = [
         headers.join(','),
         ...rows.map(row => row.map(cell => `"${cell}"`).join(','))
@@ -61,7 +61,7 @@ export const ExportPanel: React.FC = () => {
 
       // Dynamic import of xlsx
       const XLSX = await import('xlsx');
-      
+
       // Create worksheet data
       const worksheetData = [
         ['Title', 'Artist', 'Duration', 'URL'],
@@ -76,10 +76,10 @@ export const ExportPanel: React.FC = () => {
       const worksheet = XLSX.utils.aoa_to_sheet(worksheetData);
       const workbook = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(workbook, worksheet, 'Playlist');
-      
+
       // Download Excel file
       XLSX.writeFile(workbook, `playlist_${new Date().getTime()}.xlsx`);
-      
+
       showNotification('Playlist exported to Excel successfully', 'success');
     } catch (error: any) {
       showNotification(`Failed to export Excel: ${error.message}`, 'error');
@@ -123,9 +123,9 @@ export const ExportPanel: React.FC = () => {
       const { toBlobURL } = await import('@ffmpeg/util');
 
       const ffmpeg = new FFmpeg();
-      
+
       // Load FFmpeg
-      const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
+      const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
       await ffmpeg.load({
         coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
         wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
@@ -135,7 +135,7 @@ export const ExportPanel: React.FC = () => {
       const imageResponse = await fetch(thumbnailSettings.thumbnailUrl);
       const imageBlob = await imageResponse.blob();
       const imageArrayBuffer = await imageBlob.arrayBuffer();
-      
+
       // Convert audio URL to blob
       const audioResponse = await fetch(stitchedAudioUrl);
       const audioBlob = await audioResponse.blob();
@@ -172,7 +172,7 @@ export const ExportPanel: React.FC = () => {
 
       // Read the output file
       const data = await ffmpeg.readFile(outputFileName);
-      
+
       // Convert FileData to ArrayBuffer for Blob
       let arrayBuffer: ArrayBuffer;
       if (data instanceof Uint8Array) {
@@ -197,7 +197,7 @@ export const ExportPanel: React.FC = () => {
           targetView.set(sourceView);
         }
       }
-      
+
       // Create blob and download
       const videoBlob = new Blob([arrayBuffer], { type: 'video/mp4' });
       const videoUrl = URL.createObjectURL(videoBlob);
@@ -230,7 +230,7 @@ export const ExportPanel: React.FC = () => {
         <div className="text-center">
           <h3 className="text-2xl font-semibold text-gray-900 mb-4">✅ Ready to Export!</h3>
           <p className="text-gray-600 mb-6">
-            Your playlist has been stitched and the video thumbnail has been designed. 
+            Your playlist has been stitched and the video thumbnail has been designed.
             You can now export your final files.
           </p>
         </div>
@@ -253,10 +253,10 @@ export const ExportPanel: React.FC = () => {
               disabled={!stitchedAudioUrl || isExportingVideo}
               className="w-full"
             >
-              {isExportingVideo 
-                ? '⏳ Creating Video...' 
-                : stitchedAudioUrl 
-                  ? '🎬 Export Video with Audio' 
+              {isExportingVideo
+                ? '⏳ Creating Video...'
+                : stitchedAudioUrl
+                  ? '🎬 Export Video with Audio'
                   : '⚠️ Stitch Audio First'}
             </Button>
           </div>
@@ -279,47 +279,47 @@ export const ExportPanel: React.FC = () => {
 
           {/* Data Export */}
           <div className="border border-gray-200 rounded-lg p-4">
-          <h4 className="text-sm font-semibold text-gray-700 mb-2">Data Export</h4>
-          <p className="text-xs text-gray-500 mb-3">
-            Export your playlist and feedback as CSV or Excel files
-          </p>
-          <div className="grid grid-cols-2 gap-3">
-            <Button
-              variant="secondary"
-              onClick={handleExportCSV}
-              disabled={playlist.length === 0}
-              className="w-full"
-            >
-              📊 Export CSV
-            </Button>
-            <Button
-              variant="secondary"
-              onClick={handleExportExcel}
-              disabled={playlist.length === 0}
-              className="w-full"
-            >
-              📈 Export Excel
-            </Button>
-          </div>
+            <h4 className="text-sm font-semibold text-gray-700 mb-2">Data Export</h4>
+            <p className="text-xs text-gray-500 mb-3">
+              Export your playlist and feedback as CSV or Excel files
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <Button
+                variant="secondary"
+                onClick={handleExportCSV}
+                disabled={playlist.length === 0}
+                className="w-full"
+              >
+                📊 Export CSV
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={handleExportExcel}
+                disabled={playlist.length === 0}
+                className="w-full"
+              >
+                📈 Export Excel
+              </Button>
+            </div>
           </div>
 
           {/* Project Summary */}
-        <div className="border border-gray-200 rounded-lg p-4 bg-gray-50">
-          <h4 className="text-sm font-semibold text-gray-700 mb-2">Export Summary</h4>
-          <div className="space-y-1 text-sm text-gray-600">
-            <div className="flex justify-between">
-              <span>Songs:</span>
-              <span className="font-semibold">{playlist.length}</span>
+          <div className="border border-gray-200 rounded-lg p-4 bg-gray-50">
+            <h4 className="text-sm font-semibold text-gray-700 mb-2">Export Summary</h4>
+            <div className="space-y-1 text-sm text-gray-600">
+              <div className="flex justify-between">
+                <span>Songs:</span>
+                <span className="font-semibold">{playlist.length}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Feedback Notes:</span>
+                <span className="font-semibold">{feedback.length}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Stitched Audio:</span>
+                <span className="font-semibold">{stitchedAudioUrl ? '✅ Ready' : '❌ Not Ready'}</span>
+              </div>
             </div>
-            <div className="flex justify-between">
-              <span>Feedback Notes:</span>
-              <span className="font-semibold">{feedback.length}</span>
-            </div>
-            <div className="flex justify-between">
-              <span>Stitched Audio:</span>
-              <span className="font-semibold">{stitchedAudioUrl ? '✅ Ready' : '❌ Not Ready'}</span>
-            </div>
-          </div>
           </div>
         </div>
       </div>
