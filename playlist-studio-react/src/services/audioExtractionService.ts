@@ -22,7 +22,11 @@ export class AudioExtractionService {
   private apiBaseUrl: string;
 
   constructor() {
-    this.apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001';
+    // Ensure base URL doesn't have trailing slash or /api suffix
+    const baseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001';
+    this.apiBaseUrl = baseUrl.endsWith('/api')
+      ? baseUrl.slice(0, -4)
+      : baseUrl;
   }
 
   /**
@@ -79,7 +83,7 @@ export class AudioExtractionService {
       let finalAudioUrl = result.audioUrl;
       const isYouTube = videoUrl.includes('youtube.com') || videoUrl.includes('youtu.be');
       const isSuno = videoUrl.includes('suno.com') || videoUrl.includes('suno.ai');
-      
+
       if (isYouTube || isSuno) {
         // Always proxy extracted URLs through backend to avoid CORS issues
         finalAudioUrl = `${this.apiBaseUrl}/api/extract-audio/proxy?url=${encodeURIComponent(result.audioUrl)}`;
@@ -117,7 +121,7 @@ export class AudioExtractionService {
 
       // Download the audio file
       const audioResponse = await fetch(extractionResult.audioUrl);
-      
+
       if (!audioResponse.ok) {
         throw new Error(`Failed to download audio: ${audioResponse.statusText}`);
       }
