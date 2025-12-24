@@ -10,7 +10,7 @@ export interface VideoEditorRef {
 }
 
 interface VideoEditorProps {
-  onThumbnailChange?: (thumbnailUrl: string) => void;
+  onThumbnailChange?: (data: { thumbnailUrl: string; playlistPosition: { x: number; y: number } }) => void;
 }
 
 export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThumbnailChange }, ref) => {
@@ -18,7 +18,7 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
   const { showNotification } = useNotifications();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
-  
+
   const [backgroundColor, setBackgroundColor] = useState('#000000');
   const textColor = '#FFFFFF'; // Default text color
   const fontSize = 48; // Default font size for custom elements
@@ -86,17 +86,17 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
     const calculatedTimes = playlist.map((song, index) => {
       const startTime = accumulatedTime;
       const songDuration = song.duration ? parseDuration(song.duration) : 180;
-      
+
       // Calculate end time (when this song ends)
       const endTime = accumulatedTime + songDuration;
       accumulatedTime = endTime;
-      
+
       // Add delay after each song except the last one
       // This delay is added AFTER the song ends, so the next song starts after the delay
       if (index < playlist.length - 1 && delayBetweenSongs > 0) {
         accumulatedTime += delayBetweenSongs;
       }
-      
+
       return {
         songId: song.id,
         startTime,
@@ -121,7 +121,7 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
             // Last song ends at the actual audio duration
             scaledEndTime = actualAudioDuration;
           }
-          
+
           return {
             ...songTime,
             startTime: scaledStartTime,
@@ -139,8 +139,8 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
   const getCurrentSong = () => {
     const songStartTimes = calculateSongStartTimes();
     return songStartTimes.find(
-      (song, index) => 
-        currentPlaybackTime >= song.startTime && 
+      (song, index) =>
+        currentPlaybackTime >= song.startTime &&
         (index === songStartTimes.length - 1 || currentPlaybackTime < songStartTimes[index + 1].startTime)
     );
   };
@@ -157,10 +157,10 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
     addText: () => {
       const text = prompt('Enter text:');
       if (!text) return;
-      
+
       const canvas = canvasRef.current;
       if (!canvas) return;
-      
+
       const newElement = {
         id: generateId(),
         type: 'text',
@@ -181,7 +181,7 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
     addImage: (imageUrl: string) => {
       const canvas = canvasRef.current;
       if (!canvas) return;
-      
+
       const newElement = {
         id: generateId(),
         type: 'image',
@@ -292,23 +292,23 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
   // Get cursor style based on resize handle
   const getCursorForHandle = (handle: string | null): string => {
     if (!handle) return 'move'; // 4-sided arrow for moving
-    
+
     // 2-sided arrows for resizing
     if (handle === 'nw' || handle === 'se') return 'nwse-resize';
     if (handle === 'ne' || handle === 'sw') return 'nesw-resize';
     if (handle.includes('n') || handle.includes('s')) return 'ns-resize';
     if (handle.includes('e') || handle.includes('w')) return 'ew-resize';
-    
+
     return 'move';
   };
 
   // Check if point is on the playlist area
   const isPointOnPlaylist = (x: number, y: number): boolean => {
     if (playlist.length === 0) return false;
-    
+
     const canvas = canvasRef.current;
     if (!canvas) return false;
-    
+
     const songsPerColumn = 5;
     const adjustedItemHeight = playlistFontSize * 1.5;
     const adjustedSpacing = playlistFontSize * 0.5;
@@ -316,13 +316,13 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
     const columnWidth = canvas.width * 0.35;
     const columnSpacing = canvas.width * 0.1;
     const playlistWidth = columnWidth * 2 + columnSpacing;
-    
+
     // Calculate playlist position (centered by default, but movable)
-    const playlistX = playlistPosition.x === 50 
+    const playlistX = playlistPosition.x === 50
       ? (canvas.width - playlistWidth) / 2
       : (canvas.width * playlistPosition.x) / 100 - (playlistWidth / 2);
     const playlistY = (canvas.height * playlistPosition.y) / 100;
-    
+
     return (
       x >= playlistX &&
       x <= playlistX + playlistWidth &&
@@ -334,26 +334,26 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
   // Check if point is on the title text
   const isPointOnTitle = (x: number, y: number): boolean => {
     if (!showTitle || !title) return false;
-    
+
     const canvas = canvasRef.current;
     if (!canvas) return false;
-    
+
     const titleX = (canvas.width * titlePosition.x) / 100;
     const titleY = (canvas.height * titlePosition.y) / 100;
-    
+
     // Measure text width and height
     const ctx = canvas.getContext('2d');
     if (!ctx) return false;
-    
+
     ctx.font = `bold ${titleFontSize}px ${titleFontFamily}`;
     const metrics = ctx.measureText(title);
     const textWidth = metrics.width;
     const textHeight = titleFontSize;
-    
+
     // Check if click is within text bounds (centered text)
     const halfWidth = textWidth / 2;
     const halfHeight = textHeight / 2;
-    
+
     return (
       x >= titleX - halfWidth &&
       x <= titleX + halfWidth &&
@@ -364,11 +364,11 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
 
   const handleCanvasMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const coords = getCanvasCoordinates(e);
-    
+
     // Check if clicking on custom elements first (highest priority)
     const clickedElement = elements.find(el => isPointInElement(coords.x, coords.y, el));
-    
-      if (clickedElement) {
+
+    if (clickedElement) {
       setSelectedElementId(clickedElement.id);
       setSelectedComponent('element');
       const handle = getResizeHandle(coords.x, coords.y, clickedElement);
@@ -389,7 +389,7 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
       setDragStart(coords);
       return;
     }
-    
+
     // Check if clicking on playlist
     if (playlist.length > 0 && isPointOnPlaylist(coords.x, coords.y)) {
       setSelectedComponent('playlist');
@@ -399,7 +399,7 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
       setDragStart(coords);
       return;
     }
-    
+
     // Check if clicking on title
     if (showTitle && title && isPointOnTitle(coords.x, coords.y)) {
       setSelectedComponent('title');
@@ -409,7 +409,7 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
       setDragStart(coords);
       return;
     }
-    
+
     // Deselect everything if clicking on empty space
     setSelectedElementId(null);
     setSelectedComponent(null);
@@ -423,18 +423,18 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
     if (isDraggingPlaylist) {
       const deltaX = coords.x - dragStart.x;
       const deltaY = coords.y - dragStart.y;
-      
+
       setPlaylistPosition(prev => {
         const newX = prev.x + (deltaX / canvas.width) * 100;
         const newY = prev.y + (deltaY / canvas.height) * 100;
-        
+
         // Clamp to canvas bounds
         return {
           x: Math.max(0, Math.min(100, newX)),
           y: Math.max(0, Math.min(100, newY)),
         };
       });
-      
+
       setDragStart(coords); // Update drag start for smooth dragging
       requestSmoothRender();
       return;
@@ -444,18 +444,18 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
     if (isDraggingTitle) {
       const deltaX = coords.x - dragStart.x;
       const deltaY = coords.y - dragStart.y;
-      
+
       setTitlePosition(prev => {
         const newX = prev.x + (deltaX / canvas.width) * 100;
         const newY = prev.y + (deltaY / canvas.height) * 100;
-        
+
         // Clamp to canvas bounds
         return {
           x: Math.max(0, Math.min(100, newX)),
           y: Math.max(0, Math.min(100, newY)),
         };
       });
-      
+
       setDragStart(coords); // Update drag start for smooth dragging
       requestSmoothRender();
       return;
@@ -533,7 +533,7 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
       const rect = canvas.getBoundingClientRect();
       const scaleX = canvas.width / rect.width;
       const scaleY = canvas.height / rect.height;
-      
+
       const coords = {
         x: (e.clientX - rect.left) * scaleX,
         y: (e.clientY - rect.top) * scaleY,
@@ -557,7 +557,7 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
 
   const handleCanvasMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const coords = getCanvasCoordinates(e);
-    
+
     // Update cursor based on position
     if (!isResizing && !isDragging && !isDraggingTitle && !isDraggingPlaylist) {
       const hoveredElement = elements.find(el => isPointInElement(coords.x, coords.y, el));
@@ -568,7 +568,7 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
         setCanvasCursor('default');
       }
     }
-    
+
     handleMouseMoveLogic(coords);
   };
 
@@ -670,7 +670,7 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
 
   useEffect(() => {
     requestRender();
-      }, [backgroundColor, textColor, fontSize, showTitle, title, titleFontSize, titlePosition, titleFontFamily, showTitleBorder, titleBorderColor, titleBorderWidth, titleBorderRadius, titleOpacity, playlistPosition, playlistFontSize, playlistTextColor, showPlaylistBorder, playlistBorderColor, playlistBorderWidth, playlistBorderRadius, playlistOpacity, playlist, elements, selectedElementId, selectedComponent, isDraggingTitle, isDraggingPlaylist, currentPlaybackTime]);
+  }, [backgroundColor, textColor, fontSize, showTitle, title, titleFontSize, titlePosition, titleFontFamily, showTitleBorder, titleBorderColor, titleBorderWidth, titleBorderRadius, titleOpacity, playlistPosition, playlistFontSize, playlistTextColor, showPlaylistBorder, playlistBorderColor, playlistBorderWidth, playlistBorderRadius, playlistOpacity, playlist, elements, selectedElementId, selectedComponent, isDraggingTitle, isDraggingPlaylist, currentPlaybackTime]);
 
   // Re-render during drag/resize
   useEffect(() => {
@@ -694,71 +694,71 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
     ctx.fillStyle = backgroundColor;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-        // Draw title if enabled (with opacity)
-        if (showTitle && title) {
-          ctx.save();
-          ctx.globalAlpha = titleOpacity;
-          ctx.fillStyle = textColor;
-          ctx.font = `bold ${titleFontSize}px ${titleFontFamily}`;
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          const titleX = (canvas.width * titlePosition.x) / 100;
-          const titleY = (canvas.height * titlePosition.y) / 100;
-          
-          // Measure text for visual feedback
-          const metrics = ctx.measureText(title);
-          const textWidth = metrics.width;
-          const textHeight = titleFontSize;
-          
-          // Draw border around title if enabled
-          if (showTitleBorder) {
-            ctx.strokeStyle = titleBorderColor;
-            ctx.lineWidth = titleBorderWidth;
-            ctx.beginPath();
-            const padding = 10;
-            const borderX = titleX - textWidth / 2 - padding;
-            const borderY = titleY - textHeight / 2 - padding;
-            const borderWidth = textWidth + (padding * 2);
-            const borderHeight = textHeight + (padding * 2);
-            
-            if (titleBorderRadius > 0) {
-              // Rounded rectangle
-              const radius = titleBorderRadius;
-              ctx.moveTo(borderX + radius, borderY);
-              ctx.lineTo(borderX + borderWidth - radius, borderY);
-              ctx.quadraticCurveTo(borderX + borderWidth, borderY, borderX + borderWidth, borderY + radius);
-              ctx.lineTo(borderX + borderWidth, borderY + borderHeight - radius);
-              ctx.quadraticCurveTo(borderX + borderWidth, borderY + borderHeight, borderX + borderWidth - radius, borderY + borderHeight);
-              ctx.lineTo(borderX + radius, borderY + borderHeight);
-              ctx.quadraticCurveTo(borderX, borderY + borderHeight, borderX, borderY + borderHeight - radius);
-              ctx.lineTo(borderX, borderY + radius);
-              ctx.quadraticCurveTo(borderX, borderY, borderX + radius, borderY);
-            } else {
-              // Regular rectangle
-              ctx.rect(borderX, borderY, borderWidth, borderHeight);
-            }
-            ctx.stroke();
-          }
-          
-          ctx.fillText(title, titleX, titleY);
-          
-          // Draw selection indicator if title is selected (overlay on top with full opacity)
-          if (selectedComponent === 'title') {
-            ctx.globalAlpha = 1.0; // Full opacity for selection indicator
-            ctx.strokeStyle = '#3b82f6';
-            ctx.lineWidth = 2;
-            ctx.setLineDash([5, 5]);
-            ctx.strokeRect(
-              titleX - textWidth / 2 - 5,
-              titleY - textHeight / 2 - 5,
-              textWidth + 10,
-              textHeight + 10
-            );
-            ctx.setLineDash([]);
-          }
-          
-          ctx.restore();
+    // Draw title if enabled (with opacity)
+    if (showTitle && title) {
+      ctx.save();
+      ctx.globalAlpha = titleOpacity;
+      ctx.fillStyle = textColor;
+      ctx.font = `bold ${titleFontSize}px ${titleFontFamily}`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const titleX = (canvas.width * titlePosition.x) / 100;
+      const titleY = (canvas.height * titlePosition.y) / 100;
+
+      // Measure text for visual feedback
+      const metrics = ctx.measureText(title);
+      const textWidth = metrics.width;
+      const textHeight = titleFontSize;
+
+      // Draw border around title if enabled
+      if (showTitleBorder) {
+        ctx.strokeStyle = titleBorderColor;
+        ctx.lineWidth = titleBorderWidth;
+        ctx.beginPath();
+        const padding = 10;
+        const borderX = titleX - textWidth / 2 - padding;
+        const borderY = titleY - textHeight / 2 - padding;
+        const borderWidth = textWidth + (padding * 2);
+        const borderHeight = textHeight + (padding * 2);
+
+        if (titleBorderRadius > 0) {
+          // Rounded rectangle
+          const radius = titleBorderRadius;
+          ctx.moveTo(borderX + radius, borderY);
+          ctx.lineTo(borderX + borderWidth - radius, borderY);
+          ctx.quadraticCurveTo(borderX + borderWidth, borderY, borderX + borderWidth, borderY + radius);
+          ctx.lineTo(borderX + borderWidth, borderY + borderHeight - radius);
+          ctx.quadraticCurveTo(borderX + borderWidth, borderY + borderHeight, borderX + borderWidth - radius, borderY + borderHeight);
+          ctx.lineTo(borderX + radius, borderY + borderHeight);
+          ctx.quadraticCurveTo(borderX, borderY + borderHeight, borderX, borderY + borderHeight - radius);
+          ctx.lineTo(borderX, borderY + radius);
+          ctx.quadraticCurveTo(borderX, borderY, borderX + radius, borderY);
+        } else {
+          // Regular rectangle
+          ctx.rect(borderX, borderY, borderWidth, borderHeight);
         }
+        ctx.stroke();
+      }
+
+      ctx.fillText(title, titleX, titleY);
+
+      // Draw selection indicator if title is selected (overlay on top with full opacity)
+      if (selectedComponent === 'title') {
+        ctx.globalAlpha = 1.0; // Full opacity for selection indicator
+        ctx.strokeStyle = '#3b82f6';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([5, 5]);
+        ctx.strokeRect(
+          titleX - textWidth / 2 - 5,
+          titleY - textHeight / 2 - 5,
+          textWidth + 10,
+          textHeight + 10
+        );
+        ctx.setLineDash([]);
+      }
+
+      ctx.restore();
+    }
 
     // Draw custom elements
     elements.forEach((element) => {
@@ -827,17 +827,17 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
     if (playlist.length > 0) {
       ctx.save();
       ctx.globalAlpha = playlistOpacity;
-      
+
       const maxItems = 10;
       const itemsToShow = playlist.slice(0, maxItems);
       const columnWidth = canvas.width * 0.35; // Width for each column
       const columnSpacing = canvas.width * 0.1; // Space between columns
       const songsPerColumn = 5;
-      
+
       // Calculate playlist position (centered by default, but movable)
       const totalPlaylistWidth = (columnWidth * 2) + columnSpacing;
       // Use playlistPosition.x, but if it's 50 (default center), calculate actual center
-      const playlistX = playlistPosition.x === 50 
+      const playlistX = playlistPosition.x === 50
         ? (canvas.width - totalPlaylistWidth) / 2
         : (canvas.width * playlistPosition.x) / 100 - (totalPlaylistWidth / 2);
       const playlistY = (canvas.height * playlistPosition.y) / 100;
@@ -883,7 +883,7 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
         const adjustedSpacing = playlistFontSize * 0.5;
         const playlistHeight = songsPerColumn * (adjustedItemHeight + adjustedSpacing);
         const playlistWidth = columnWidth * 2 + columnSpacing;
-        
+
         ctx.strokeStyle = playlistBorderColor;
         ctx.lineWidth = playlistBorderWidth;
         ctx.beginPath();
@@ -910,13 +910,13 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
         // Determine which column (0 = left, 1 = right)
         const column = Math.floor(index / songsPerColumn);
         const rowInColumn = index % songsPerColumn;
-        
+
         const x = playlistX + (column * (columnWidth + columnSpacing));
         const y = playlistY + (rowInColumn * (adjustedItemHeight + adjustedSpacing));
-        
+
         const startTime = startTimesMap.get(song.id) || '0:00';
         const isCurrentSong = currentSong && song.id === currentSong.songId;
-        
+
         // Draw highlight background for current song
         if (isCurrentSong) {
           ctx.fillStyle = 'rgba(59, 130, 246, 0.3)'; // Blue highlight background
@@ -927,16 +927,16 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
             adjustedItemHeight + 10
           );
         }
-        
+
         // Draw song text with different color for current song
         ctx.fillStyle = isCurrentSong ? '#3b82f6' : playlistTextColor; // Blue for current, custom color for others
         const songText = `${index + 1}. ${song.title}${song.artist ? ` - ${song.artist}` : ''}`;
         const timestampText = `[${startTime}]`;
-        
+
         // Measure text to position timestamp
         const songTextWidth = ctx.measureText(songText).width;
         const maxWidth = columnWidth - 100; // Leave space for timestamp
-        
+
         // Draw song title
         ctx.fillText(
           songText,
@@ -944,7 +944,7 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
           y,
           maxWidth
         );
-        
+
         // Draw timestamp next to song name (slightly smaller font)
         const timestampFontSize = Math.max(20, playlistFontSize * 0.75);
         ctx.font = `${timestampFontSize}px Arial`;
@@ -957,7 +957,7 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
           columnWidth * 0.3
         );
         ctx.globalAlpha = playlistOpacity; // Reset to playlist opacity
-        
+
         // Reset font for next iteration
         ctx.font = `${playlistFontSize}px Arial`;
       });
@@ -976,15 +976,15 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
           lastRowY
         );
       }
-      
+
       ctx.restore();
     }
 
     // Generate thumbnail URL
     const dataUrl = canvas.toDataURL('image/png');
     setThumbnailUrl(dataUrl);
-    onThumbnailChange?.(dataUrl);
-    
+    onThumbnailChange?.({ thumbnailUrl: dataUrl, playlistPosition });
+
     // Save thumbnail settings to context for review step
     if (typeof window !== 'undefined' && (window as any).saveThumbnailData) {
       (window as any).saveThumbnailData({
@@ -1034,11 +1034,11 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
 
   const songStartTimes = calculateSongStartTimes();
   // Use actual audio duration if available, otherwise use calculated duration
-  const totalDuration = actualAudioDuration > 0 
-    ? actualAudioDuration 
-    : (songStartTimes.length > 0 
-        ? songStartTimes[songStartTimes.length - 1].endTime 
-        : 0);
+  const totalDuration = actualAudioDuration > 0
+    ? actualAudioDuration
+    : (songStartTimes.length > 0
+      ? songStartTimes[songStartTimes.length - 1].endTime
+      : 0);
 
   return (
     <div className="space-y-6">
@@ -1054,7 +1054,7 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
           <canvas
             ref={canvasRef}
             className="max-w-full h-auto border border-gray-300 rounded"
-            style={{ 
+            style={{
               maxHeight: '400px',
               cursor: canvasCursor
             }}
@@ -1085,7 +1085,7 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
             src={stitchedAudioUrl}
             className="hidden"
           />
-          
+
           {/* Compact Media Player */}
           <div className="flex items-center gap-3 w-full min-w-0">
             {/* Play/Pause Button */}
@@ -1097,12 +1097,12 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
             >
               {isPlaying ? '⏸️' : '▶️'}
             </Button>
-            
+
             {/* Time Display */}
             <span className="text-xs text-gray-600 min-w-[50px] flex-shrink-0">
               {formatTime(currentPlaybackTime)}
             </span>
-            
+
             {/* Timeline - Ensure full width */}
             <div className="flex-1 relative min-w-0 w-full">
               <input
@@ -1120,13 +1120,13 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
                 onMouseUp={() => setIsDraggingTimeline(false)}
                 className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer"
                 style={{
-                  background: totalDuration > 0 
+                  background: totalDuration > 0
                     ? `linear-gradient(to right, #3b82f6 0%, #3b82f6 ${(currentPlaybackTime / totalDuration) * 100}%, #e5e7eb ${(currentPlaybackTime / totalDuration) * 100}%, #e5e7eb 100%)`
                     : '#e5e7eb'
                 }}
               />
             </div>
-            
+
             {/* Total Duration */}
             <span className="text-xs text-gray-600 min-w-[50px] text-right flex-shrink-0">
               {formatTime(totalDuration)}
@@ -1164,7 +1164,7 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
                     />
                   </div>
-                  
+
                   {/* Font Family */}
                   <div className="mb-3">
                     <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -1212,7 +1212,7 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
                       />
                       <span className="text-sm font-medium text-gray-700">Show Border</span>
                     </label>
-                    
+
                     {showTitleBorder && (
                       <div className="space-y-3 ml-6">
                         <div>
@@ -1235,7 +1235,7 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
                             />
                           </div>
                         </div>
-                        
+
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-2">
                             Border Width: {titleBorderWidth}px
@@ -1249,7 +1249,7 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
                             className="w-full"
                           />
                         </div>
-                        
+
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-2">
                             Corner Radius: {titleBorderRadius}px
@@ -1347,7 +1347,7 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
                 className="w-full"
               />
             </div>
-            
+
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Text Color
@@ -1380,7 +1380,7 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
                 />
                 <span className="text-sm font-medium text-gray-700">Show Border</span>
               </label>
-              
+
               {showPlaylistBorder && (
                 <div className="space-y-3 ml-6">
                   <div>
@@ -1403,7 +1403,7 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
                       />
                     </div>
                   </div>
-                  
+
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
                       Border Width: {playlistBorderWidth}px
@@ -1417,7 +1417,7 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
                       className="w-full"
                     />
                   </div>
-                  
+
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
                       Corner Radius: {playlistBorderRadius}px
@@ -1435,7 +1435,7 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
                 </div>
               )}
             </div>
-            
+
             {/* Opacity */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -1483,12 +1483,11 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
 
           {/* Title Element */}
           {showTitle && (
-            <div 
-              className={`p-2 rounded border-2 flex items-center justify-between cursor-pointer transition-colors ${
-                selectedComponent === 'title' 
-                  ? 'bg-blue-100 border-blue-500' 
-                  : 'bg-white border-gray-300 hover:bg-gray-50'
-              }`}
+            <div
+              className={`p-2 rounded border-2 flex items-center justify-between cursor-pointer transition-colors ${selectedComponent === 'title'
+                ? 'bg-blue-100 border-blue-500'
+                : 'bg-white border-gray-300 hover:bg-gray-50'
+                }`}
               onClick={() => {
                 setSelectedComponent('title');
                 setSelectedElementId(null);
@@ -1533,12 +1532,11 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
 
           {/* Playlist Element */}
           {playlist.length > 0 && (
-            <div 
-              className={`p-2 rounded border-2 flex items-center justify-between cursor-pointer transition-colors ${
-                selectedComponent === 'playlist' 
-                  ? 'bg-blue-100 border-blue-500' 
-                  : 'bg-white border-gray-300 hover:bg-gray-50'
-              }`}
+            <div
+              className={`p-2 rounded border-2 flex items-center justify-between cursor-pointer transition-colors ${selectedComponent === 'playlist'
+                ? 'bg-blue-100 border-blue-500'
+                : 'bg-white border-gray-300 hover:bg-gray-50'
+                }`}
               onClick={() => {
                 setSelectedComponent('playlist');
                 setSelectedElementId(null);
@@ -1581,11 +1579,10 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
           {elements.map((element, index) => (
             <div
               key={element.id}
-              className={`p-2 rounded border-2 flex items-center justify-between cursor-pointer transition-colors ${
-                selectedComponent === 'element' && selectedElementId === element.id
-                  ? 'bg-blue-100 border-blue-500' 
-                  : 'bg-white border-gray-300 hover:bg-gray-50'
-              }`}
+              className={`p-2 rounded border-2 flex items-center justify-between cursor-pointer transition-colors ${selectedComponent === 'element' && selectedElementId === element.id
+                ? 'bg-blue-100 border-blue-500'
+                : 'bg-white border-gray-300 hover:bg-gray-50'
+                }`}
               onClick={() => {
                 setSelectedComponent('element');
                 setSelectedElementId(element.id);
@@ -1596,11 +1593,11 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
                   {element.type === 'text' ? '📝' : element.type === 'image' ? '🖼️' : '🔷'}
                 </span>
                 <span className="text-sm font-medium text-gray-700">
-                  {element.type === 'text' 
+                  {element.type === 'text'
                     ? `Text: "${element.text?.substring(0, 20)}${element.text && element.text.length > 20 ? '...' : ''}"`
                     : element.type === 'image'
-                    ? 'Image'
-                    : element.type}
+                      ? 'Image'
+                      : element.type}
                 </span>
               </div>
               <div className="flex gap-1">
@@ -1670,8 +1667,8 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
                     type="text"
                     value={selectedElement.text || ''}
                     onChange={(e) => {
-                      setElements(elements.map(el => 
-                        el.id === selectedElementId 
+                      setElements(elements.map(el =>
+                        el.id === selectedElementId
                           ? { ...el, text: e.target.value, width: e.target.value.length * (selectedElement.fontSize || fontSize) * 0.6 }
                           : el
                       ));
@@ -1688,8 +1685,8 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
                   <select
                     value={selectedElement.fontFamily || 'Arial'}
                     onChange={(e) => {
-                      setElements(elements.map(el => 
-                        el.id === selectedElementId 
+                      setElements(elements.map(el =>
+                        el.id === selectedElementId
                           ? { ...el, fontFamily: e.target.value }
                           : el
                       ));
@@ -1722,8 +1719,8 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
                       type="color"
                       value={selectedElement.color || textColor}
                       onChange={(e) => {
-                        setElements(elements.map(el => 
-                          el.id === selectedElementId 
+                        setElements(elements.map(el =>
+                          el.id === selectedElementId
                             ? { ...el, color: e.target.value }
                             : el
                         ));
@@ -1734,8 +1731,8 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
                       type="text"
                       value={selectedElement.color || textColor}
                       onChange={(e) => {
-                        setElements(elements.map(el => 
-                          el.id === selectedElementId 
+                        setElements(elements.map(el =>
+                          el.id === selectedElementId
                             ? { ...el, color: e.target.value }
                             : el
                         ));
@@ -1757,8 +1754,8 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
                     value={selectedElement.fontSize || fontSize}
                     onChange={(e) => {
                       const newSize = Number(e.target.value);
-                      setElements(elements.map(el => 
-                        el.id === selectedElementId 
+                      setElements(elements.map(el =>
+                        el.id === selectedElementId
                           ? { ...el, fontSize: newSize, width: (el.text || '').length * newSize * 0.6, height: newSize }
                           : el
                       ));
@@ -1843,8 +1840,8 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
                     step="0.01"
                     value={selectedElement.opacity !== undefined ? selectedElement.opacity : 1}
                     onChange={(e) => {
-                      setElements(elements.map(el => 
-                        el.id === selectedElementId 
+                      setElements(elements.map(el =>
+                        el.id === selectedElementId
                           ? { ...el, opacity: Number(e.target.value) }
                           : el
                       ));
@@ -1907,7 +1904,7 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
       {/* Info */}
       <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
         <p className="text-sm text-blue-800">
-          💡 <strong>Tip:</strong> This thumbnail will be used as the video cover. You can customize colors, 
+          💡 <strong>Tip:</strong> This thumbnail will be used as the video cover. You can customize colors,
           title, and text to match your brand. The playlist will appear as a list below the title.
         </p>
       </div>

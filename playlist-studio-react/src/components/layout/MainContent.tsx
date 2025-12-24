@@ -98,12 +98,12 @@ const MainContent: React.FC = () => {
 
             <VideoEditor
               ref={videoEditorRef}
-              onThumbnailChange={(thumbnailUrl) => {
+              onThumbnailChange={(data) => {
                 // Store thumbnail data for review step
                 if (typeof window !== 'undefined') {
                   (window as any).thumbnailSettings = {
-                    thumbnailUrl: thumbnailUrl,
-                    playlistPosition: { x: 50, y: 50 } // Default position if not tracked
+                    thumbnailUrl: data.thumbnailUrl,
+                    playlistPosition: data.playlistPosition
                   };
                 }
               }}
