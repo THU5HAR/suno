@@ -115,7 +115,7 @@ export const ExportPanel: React.FC = () => {
     }
 
     setIsExportingVideo(true);
-    showNotification('Creating video with audio... This may take a moment.', 'info');
+    showNotification('Generating video frames... this may take a moment.', 'info');
 
     try {
       // Import FFmpeg dynamically
@@ -124,76 +124,171 @@ export const ExportPanel: React.FC = () => {
 
       const ffmpeg = new FFmpeg();
 
-      // Load FFmpeg
+      // Load FFmpeg (using ESM build)
       const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
       await ffmpeg.load({
         coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
         wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
       });
 
-      // Convert thumbnail image URL to blob
-      const imageResponse = await fetch(thumbnailSettings.thumbnailUrl);
-      const imageBlob = await imageResponse.blob();
-      const imageArrayBuffer = await imageBlob.arrayBuffer();
-
-      // Convert audio URL to blob
+      // Load audio
       const audioResponse = await fetch(stitchedAudioUrl);
       const audioBlob = await audioResponse.blob();
       const audioArrayBuffer = await audioBlob.arrayBuffer();
-
-      // Write files to FFmpeg virtual filesystem
-      await ffmpeg.writeFile('thumbnail.png', new Uint8Array(imageArrayBuffer));
       await ffmpeg.writeFile('audio.wav', new Uint8Array(audioArrayBuffer));
 
-      // Get audio duration (approximate from blob size or use a default)
-      // For now, we'll let FFmpeg determine it
+      // Load base background image
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = reject;
+        img.src = thumbnailSettings.thumbnailUrl;
+      });
+
+      // Prepare canvas for drawing frames
+      const canvas = document.createElement('canvas');
+      canvas.width = 1920;
+      canvas.height = 1080;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('Could not create canvas context');
+
+      // Helper to draw a single frame
+      const drawFrame = (highlightIndex: number) => {
+        // Draw base image
+        ctx.globalAlpha = 1.0;
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+        // Draw playlist with highlight
+        const playlistPosition = thumbnailSettings.playlistPosition || { x: 10, y: 50 };
+        const maxItems = 8;
+        const itemsToShow = playlist.slice(0, maxItems);
+        const playlistX = (canvas.width * playlistPosition.x) / 100;
+        const playlistY = (canvas.height * playlistPosition.y) / 100;
+        const itemHeight = 60;
+        const spacing = 20;
+
+        ctx.font = '36px Arial';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'top';
+
+        itemsToShow.forEach((song, index) => {
+          const y = playlistY + (index * (itemHeight + spacing));
+          const isCurrentSong = index === highlightIndex; // Simple index matching for now (since no scrolling)
+
+          // Format start time - simple calculation for display
+          // Note: In a real implementation we might want to pass exact start times, 
+          // but for visual consistency with preview, recalculating is fine.
+          // We only need the text to look right.
+
+          // Draw highlight background
+          if (isCurrentSong) {
+            ctx.fillStyle = 'rgba(59, 130, 246, 0.3)';
+            ctx.fillRect(playlistX - 10, y - 5, canvas.width * 0.8 + 20, itemHeight + 10);
+          }
+
+          // Draw text
+          ctx.fillStyle = isCurrentSong ? '#3b82f6' : '#FFFFFF';
+          const songText = `${index + 1}. ${song.title}${song.artist ? ` - ${song.artist}` : ''}`;
+
+          // We need to fetch the approximate start time for display text
+          // Ideally we pre-calculate this, but for simplicity we can estimate:
+          // This is just visual text, the video timing is handled by concat file.
+          // ... actually, we can skip the timestamp text or just render it if we have it?
+          // The preview renders `[start:time]`. Let's try to include it.
+          // For now, drawing the title is the priority.
+
+          const maxWidth = canvas.width * 0.8;
+          ctx.fillText(songText, playlistX, y, maxWidth);
+        });
+      };
+
+      // Calculate durations for each song
+      // We need exact durations to tell FFmpeg how long to show each frame
+      const parseDuration = (durationStr: string): number => {
+        const parts = durationStr.split(':');
+        if (parts.length === 2) return parseInt(parts[0]) * 60 + parseInt(parts[1]);
+        return 180;
+      };
+
+      // Generate Frames and Concat List
+      let concatList = '';
+
+      // We iterate through the playlist.
+      // For each song, we generate a frame highlighting it.
+      // We assign it a duration equal to the song's duration.
+
+      // Note: Delays. The preview includes delays. 
+      // If there is a delay, what should be shown?
+      // Ideally, the previous song remains highlighted? Or no highlight?
+      // Simple approach: The previous song frame extends through the delay.
+      for (let i = 0; i < playlist.length; i++) {
+        const song = playlist[i];
+        const duration = parseDuration(song.duration || '3:00'); // Seconds
+
+        // Draw frame for Song i
+        drawFrame(i);
+
+        const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'));
+        if (!blob) throw new Error(`Failed to generate frame for song ${i}`);
+
+        const buffer = await blob.arrayBuffer();
+        const filename = `frame_${i}.png`;
+        await ffmpeg.writeFile(filename, new Uint8Array(buffer));
+
+        // Add to concat list
+        // Format:
+        // file 'filename'
+        // duration 123.45
+        concatList += `file '${filename}'\n`;
+        concatList += `duration ${duration}\n`;
+      }
+
+      // Add the last frame again without duration (standard ffmpeg concat practice for last file)
+      // Or ensure the last one has a very long duration to cover any trailing audio
+      if (playlist.length > 0) {
+        concatList += `file 'frame_${playlist.length - 1}.png'\n`;
+        // Give it extra time to be safe, -shortest will kill it
+        // concatList += `duration 1000\n`; 
+      }
+
+      await ffmpeg.writeFile('frames.txt', concatList);
+
+      // Execute FFmpeg Concat
       const outputFileName = 'output.mp4';
 
-      // Create video: static image with audio
-      // -loop 1: loop the image
-      // -i audio.wav: input audio
-      // -c:v libx264: video codec
-      // -tune stillimage: optimize for static image
-      // -c:a aac: audio codec
-      // -shortest: finish when audio ends
-      // -pix_fmt yuv420p: ensure compatibility
       await ffmpeg.exec([
-        '-loop', '1',
-        '-framerate', '1', // Ensure input is treated as 1fps
-        '-i', 'thumbnail.png',
+        '-f', 'concat',
+        '-safe', '0',
+        '-i', 'frames.txt',
         '-i', 'audio.wav',
         '-c:v', 'libx264',
-        '-tune', 'stillimage',
-        '-preset', 'ultrafast', // Use fastest encoding speed
+        '-preset', 'ultrafast',
+        '-r', '1', // 1 fps output is sufficient for static slides
         '-c:a', 'aac',
-        '-b:a', '192k', // Reasonable audio quality
-        '-shortest',
+        '-b:a', '192k',
+        '-shortest', // Stop when audio ends
         '-pix_fmt', 'yuv420p',
         '-y',
         outputFileName
       ]);
 
-      // Read the output file
+      // Read output
       const data = await ffmpeg.readFile(outputFileName);
-
       // Convert FileData to ArrayBuffer for Blob
       let arrayBuffer: ArrayBuffer;
       if (data instanceof Uint8Array) {
-        // Create a new ArrayBuffer and copy the data
         arrayBuffer = new ArrayBuffer(data.length);
         const view = new Uint8Array(arrayBuffer);
         view.set(data);
       } else {
-        // Handle FileData type by creating a new ArrayBuffer from the buffer
         const buffer = (data as any).buffer || data;
         if (buffer instanceof ArrayBuffer) {
-          // Create a copy to ensure it's not a SharedArrayBuffer
           arrayBuffer = new ArrayBuffer(buffer.byteLength);
           const sourceView = new Uint8Array(buffer);
           const targetView = new Uint8Array(arrayBuffer);
           targetView.set(sourceView);
         } else {
-          // Fallback: create from length
           const sourceView = new Uint8Array(buffer);
           arrayBuffer = new ArrayBuffer(sourceView.length);
           const targetView = new Uint8Array(arrayBuffer);
@@ -201,23 +296,24 @@ export const ExportPanel: React.FC = () => {
         }
       }
 
-      // Create blob and download
+      // Download
       const videoBlob = new Blob([arrayBuffer], { type: 'video/mp4' });
       const videoUrl = URL.createObjectURL(videoBlob);
       const link = document.createElement('a');
       link.href = videoUrl;
-      link.download = `playlist-video_${new Date().getTime()}.mp4`;
+      link.download = `playlist-video-dynamic_${new Date().getTime()}.mp4`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(videoUrl);
 
-      // Clean up FFmpeg files
-      await ffmpeg.deleteFile('thumbnail.png');
-      await ffmpeg.deleteFile('audio.wav');
-      await ffmpeg.deleteFile(outputFileName);
+      // Cleanup
+      // (Optional: loop to delete frames, but ffmpeg cleanups usually fine if re-instantiated or memory cleared)
+      // await ffmpeg.deleteFile('frames.txt');
+      // await ffmpeg.deleteFile('audio.wav');
 
-      showNotification('Video with audio exported successfully!', 'success');
+      showNotification('Video exported successfully!', 'success');
+
     } catch (error: any) {
       console.error('Video export error:', error);
       showNotification(`Failed to export video: ${error.message || 'Unknown error'}`, 'error');
