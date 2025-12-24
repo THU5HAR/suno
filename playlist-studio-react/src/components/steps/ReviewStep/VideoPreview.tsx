@@ -4,16 +4,16 @@ import { Button } from '@/components/ui/Button';
 
 export const VideoPreview: React.FC = () => {
   const { playlist, stitchedAudioUrl, stepData } = usePlaylist();
-  
+
   // Get thumbnail settings from window (set by VideoEditor)
   const [thumbnailSettings, setThumbnailSettings] = useState<any>(null);
-  
+
   useEffect(() => {
     if (typeof window !== 'undefined' && (window as any).thumbnailSettings) {
       setThumbnailSettings((window as any).thumbnailSettings);
     }
   }, []);
-  
+
   const thumbnailUrl = thumbnailSettings?.thumbnailUrl || null;
   const playlistPosition = thumbnailSettings?.playlistPosition || { x: 10, y: 50 };
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -28,7 +28,9 @@ export const VideoPreview: React.FC = () => {
     return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
   };
 
-  // Calculate song start times (accounting for delays)
+  const [actualAudioDuration, setActualAudioDuration] = useState(0);
+
+  // Calculate song start times (accounting for delays) and scale if needed
   const calculateSongStartTimes = () => {
     const parseDuration = (durationStr: string): number => {
       const parts = durationStr.split(':');
@@ -42,33 +44,61 @@ export const VideoPreview: React.FC = () => {
     const delayBetweenSongs = stepData[2]?.stitchSettings?.delayBetweenSongs ?? 0;
 
     let accumulatedTime = 0;
-    return playlist.map((song, index) => {
+    const calculatedTimes = playlist.map((song, index) => {
       const startTime = accumulatedTime;
       const songDuration = song.duration ? parseDuration(song.duration) : 180;
-      accumulatedTime += songDuration;
-      
+
+      const endTime = accumulatedTime + songDuration;
+      accumulatedTime = endTime;
+
       // Add delay after each song except the last one
       if (index < playlist.length - 1 && delayBetweenSongs > 0) {
         accumulatedTime += delayBetweenSongs;
       }
-      
+
       return {
         songId: song.id,
         startTime,
-        endTime: accumulatedTime,
+        endTime: endTime,
         formattedTime: formatTime(startTime),
       };
     });
+
+    // If we have actual audio duration, scale the times proportionally
+    if (actualAudioDuration > 0 && calculatedTimes.length > 0) {
+      const calculatedTotalDuration = calculatedTimes[calculatedTimes.length - 1].endTime;
+      if (calculatedTotalDuration > 0 && Math.abs(calculatedTotalDuration - actualAudioDuration) > 1) {
+        const scaleFactor = actualAudioDuration / calculatedTotalDuration;
+        return calculatedTimes.map((songTime, index) => {
+          const scaledStartTime = songTime.startTime * scaleFactor;
+          let scaledEndTime: number;
+          if (index < calculatedTimes.length - 1) {
+            scaledEndTime = calculatedTimes[index + 1].startTime * scaleFactor;
+          } else {
+            scaledEndTime = actualAudioDuration;
+          }
+
+          return {
+            ...songTime,
+            startTime: scaledStartTime,
+            endTime: scaledEndTime,
+            formattedTime: formatTime(scaledStartTime),
+          };
+        });
+      }
+    }
+
+    return calculatedTimes;
   };
 
   // Calculate song start times (memoized)
-  const songStartTimes = useMemo(() => calculateSongStartTimes(), [playlist]);
+  const songStartTimes = useMemo(() => calculateSongStartTimes(), [playlist, actualAudioDuration]);
 
   // Get current playing song based on time
   const getCurrentSong = () => {
     const currentSong = songStartTimes.find(
-      (song, index) => 
-        currentTime >= song.startTime && 
+      (song, index) =>
+        currentTime >= song.startTime &&
         (index === songStartTimes.length - 1 || currentTime < songStartTimes[index + 1].startTime)
     );
     return currentSong;
@@ -78,6 +108,12 @@ export const VideoPreview: React.FC = () => {
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
+
+    const handleLoadedMetadata = () => {
+      if (audio.duration && isFinite(audio.duration)) {
+        setActualAudioDuration(audio.duration);
+      }
+    };
 
     const handleTimeUpdate = () => {
       if (!isDragging) {
@@ -92,12 +128,19 @@ export const VideoPreview: React.FC = () => {
       setCurrentTime(0);
     };
 
+    audio.addEventListener('loadedmetadata', handleLoadedMetadata);
     audio.addEventListener('timeupdate', handleTimeUpdate);
     audio.addEventListener('play', handlePlay);
     audio.addEventListener('pause', handlePause);
     audio.addEventListener('ended', handleEnded);
 
+    // Try to get duration immediately if already loaded
+    if (audio.readyState >= 1 && audio.duration && isFinite(audio.duration)) {
+      setActualAudioDuration(audio.duration);
+    }
+
     return () => {
+      audio.removeEventListener('loadedmetadata', handleLoadedMetadata);
       audio.removeEventListener('timeupdate', handleTimeUpdate);
       audio.removeEventListener('play', handlePlay);
       audio.removeEventListener('pause', handlePause);
@@ -122,11 +165,11 @@ export const VideoPreview: React.FC = () => {
     img.crossOrigin = 'anonymous';
     img.onload = () => {
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-      
+
       // Get current song and highlight it
       const currentSong = songStartTimes.find(
-        (song, index) => 
-          currentTime >= song.startTime && 
+        (song, index) =>
+          currentTime >= song.startTime &&
           (index === songStartTimes.length - 1 || currentTime < songStartTimes[index + 1].startTime)
       );
       if (currentSong && playlist.length > 0) {
@@ -150,7 +193,7 @@ export const VideoPreview: React.FC = () => {
             const y = playlistY + (index * (itemHeight + spacing));
             const startTime = startTimesMap.get(song.id) || '0:00';
             const isCurrentSong = song.id === currentSong.songId;
-            
+
             // Draw highlight background for current song
             if (isCurrentSong) {
               ctx.fillStyle = 'rgba(59, 130, 246, 0.3)'; // Blue highlight background
@@ -161,17 +204,17 @@ export const VideoPreview: React.FC = () => {
                 itemHeight + 10
               );
             }
-            
+
             // Draw song text with different color for current song
             ctx.fillStyle = isCurrentSong ? '#3b82f6' : '#FFFFFF'; // Blue for current, white for others
             const songText = `${index + 1}. ${song.title}${song.artist ? ` - ${song.artist}` : ''}`;
             const timestampText = `[${startTime}]`;
-            
+
             const songTextWidth = ctx.measureText(songText).width;
             const maxWidth = canvas.width * 0.8;
-            
+
             ctx.fillText(songText, playlistX, y, maxWidth);
-            
+
             // Draw timestamp
             ctx.font = '28px Arial';
             ctx.fillStyle = isCurrentSong ? '#3b82f6' : '#FFFFFF';
@@ -217,11 +260,11 @@ export const VideoPreview: React.FC = () => {
     setCurrentTime(time);
   };
 
-  const totalDuration = songStartTimes.length > 0 
-    ? songStartTimes[songStartTimes.length - 1].endTime 
+  const totalDuration = songStartTimes.length > 0
+    ? songStartTimes[songStartTimes.length - 1].endTime
     : 0;
   const currentSong = getCurrentSong();
-  const currentSongIndex = currentSong 
+  const currentSongIndex = currentSong
     ? playlist.findIndex(s => s.id === currentSong.songId)
     : -1;
 
@@ -238,7 +281,7 @@ export const VideoPreview: React.FC = () => {
   return (
     <div className="bg-white rounded-lg border border-gray-200 p-6 space-y-4">
       <h3 className="text-lg font-semibold text-gray-900">Video Preview</h3>
-      
+
       {/* Thumbnail Canvas */}
       <div className="bg-gray-100 rounded-lg p-4 flex justify-center">
         <canvas
@@ -255,19 +298,19 @@ export const VideoPreview: React.FC = () => {
           src={stitchedAudioUrl}
           className="w-full"
         />
-        
+
         {/* Timeline */}
         <div className="space-y-2">
           <div className="flex items-center justify-between text-xs text-gray-600">
             <span>{formatTime(currentTime)}</span>
             <span className="font-medium">
-              {currentSongIndex !== -1 
+              {currentSongIndex !== -1
                 ? `Song ${currentSongIndex + 1}: ${playlist[currentSongIndex]?.title || ''}`
                 : 'Not playing'}
             </span>
             <span>{formatTime(totalDuration)}</span>
           </div>
-          
+
           <div className="relative">
             <input
               type="range"
@@ -287,7 +330,7 @@ export const VideoPreview: React.FC = () => {
                 background: `linear-gradient(to right, #3b82f6 0%, #3b82f6 ${(currentTime / totalDuration) * 100}%, #e5e7eb ${(currentTime / totalDuration) * 100}%, #e5e7eb 100%)`
               }}
             />
-            
+
             {/* Song markers on timeline */}
             <div className="absolute top-0 left-0 right-0 h-2 pointer-events-none">
               {songStartTimes.map((song, index) => {
