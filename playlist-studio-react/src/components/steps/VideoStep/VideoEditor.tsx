@@ -20,6 +20,10 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
   const audioRef = useRef<HTMLAudioElement>(null);
 
   const [backgroundColor, setBackgroundColor] = useState('#000000');
+  const [backgroundType, setBackgroundType] = useState<'solid' | 'gradient'>('solid');
+  const [gradientType, setGradientType] = useState<'linear' | 'radial'>('linear');
+  const [gradientColors, setGradientColors] = useState<[string, string]>(['#000000', '#1a1a1a']);
+  const [gradientDirection, setGradientDirection] = useState(0); // 0-360 degrees for linear
   const textColor = '#FFFFFF'; // Default text color
   const fontSize = 48; // Default font size for custom elements
   const [showTitle, setShowTitle] = useState(true);
@@ -40,7 +44,7 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
   const [playlistBorderRadius, setPlaylistBorderRadius] = useState(0); // Border radius (rounded corners)
   const [isDraggingPlaylist, setIsDraggingPlaylist] = useState(false);
   const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null);
-  const [elements, setElements] = useState<Array<{ id: string; type: string; x: number; y: number; width?: number; height?: number; color?: string; text?: string; imageUrl?: string; fontSize?: number; fontFamily?: string; opacity?: number }>>([]);
+  const [elements, setElements] = useState<Array<{ id: string; type: string; x: number; y: number; width?: number; height?: number; color?: string; text?: string; imageUrl?: string; fontSize?: number; fontFamily?: string; opacity?: number; borderRadius?: number; borderWidth?: number; borderColor?: string; borderStyle?: 'solid' | 'dashed' | 'dotted' | 'double' | 'none' }>>([]);
   const [titleOpacity, setTitleOpacity] = useState(1);
   const [playlistOpacity, setPlaylistOpacity] = useState(1);
   const [selectedElementId, setSelectedElementId] = useState<string | null>(null);
@@ -698,7 +702,38 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
     if (canvas.height !== 1080) canvas.height = 1080;
 
     // Fill background
-    ctx.fillStyle = backgroundColor;
+    if (backgroundType === 'gradient') {
+      if (gradientType === 'linear') {
+        // Linear gradient with direction
+        const angle = (gradientDirection * Math.PI) / 180;
+        const centerX = canvas.width / 2;
+        const centerY = canvas.height / 2;
+        const length = Math.sqrt(canvas.width * canvas.width + canvas.height * canvas.height) / 2;
+        const x1 = centerX - length * Math.cos(angle);
+        const y1 = centerY - length * Math.sin(angle);
+        const x2 = centerX + length * Math.cos(angle);
+        const y2 = centerY + length * Math.sin(angle);
+        const linearGradient = ctx.createLinearGradient(x1, y1, x2, y2);
+        linearGradient.addColorStop(0, gradientColors[0]);
+        linearGradient.addColorStop(1, gradientColors[1]);
+        ctx.fillStyle = linearGradient;
+      } else {
+        // Radial gradient
+        const radialGradient = ctx.createRadialGradient(
+          canvas.width / 2,
+          canvas.height / 2,
+          0,
+          canvas.width / 2,
+          canvas.height / 2,
+          Math.max(canvas.width, canvas.height) / 2
+        );
+        radialGradient.addColorStop(0, gradientColors[0]);
+        radialGradient.addColorStop(1, gradientColors[1]);
+        ctx.fillStyle = radialGradient;
+      }
+    } else {
+      ctx.fillStyle = backgroundColor;
+    }
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     // Draw title if enabled (with opacity)
@@ -790,7 +825,81 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
       } else if (element.type === 'image' && element.imageUrl) {
         const cachedImg = loadedImagesRef.current.get(element.id);
         if (cachedImg && cachedImg.complete) {
-          ctx.drawImage(cachedImg, element.x - halfWidth, element.y - halfHeight, element.width || 200, element.height || 200);
+          const x = element.x - halfWidth;
+          const y = element.y - halfHeight;
+          const width = element.width || 200;
+          const height = element.height || 200;
+          const borderRadius = element.borderRadius || 0;
+          const borderWidth = element.borderWidth || 0;
+          const borderColor = element.borderColor || '#FFFFFF';
+          const borderStyle = element.borderStyle || 'none';
+
+          ctx.save();
+          
+          // Helper function to draw rounded rectangle
+          const drawRoundedRect = (x: number, y: number, w: number, h: number, r: number) => {
+            ctx.beginPath();
+            ctx.moveTo(x + r, y);
+            ctx.lineTo(x + w - r, y);
+            ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+            ctx.lineTo(x + w, y + h - r);
+            ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+            ctx.lineTo(x + r, y + h);
+            ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+            ctx.lineTo(x, y + r);
+            ctx.quadraticCurveTo(x, y, x + r, y);
+            ctx.closePath();
+          };
+          
+          // Create clipping path for rounded corners
+          if (borderRadius > 0) {
+            drawRoundedRect(x, y, width, height, borderRadius);
+            ctx.clip();
+          }
+          
+          // Draw image
+          ctx.drawImage(cachedImg, x, y, width, height);
+          
+          ctx.restore();
+          
+          // Draw border/frame
+          if (borderWidth > 0 && borderStyle !== 'none') {
+            ctx.save();
+            ctx.strokeStyle = borderColor;
+            ctx.lineWidth = borderWidth;
+            
+            if (borderStyle === 'dashed') {
+              ctx.setLineDash([10, 5]);
+            } else if (borderStyle === 'dotted') {
+              ctx.setLineDash([2, 4]);
+            } else if (borderStyle === 'double') {
+              // Draw double border
+              ctx.lineWidth = borderWidth / 3;
+              ctx.setLineDash([]);
+              if (borderRadius > 0) {
+                drawRoundedRect(x + borderWidth, y + borderWidth, width - borderWidth * 2, height - borderWidth * 2, Math.max(0, borderRadius - borderWidth));
+                ctx.stroke();
+                drawRoundedRect(x + borderWidth * 2, y + borderWidth * 2, width - borderWidth * 4, height - borderWidth * 4, Math.max(0, borderRadius - borderWidth * 2));
+                ctx.stroke();
+              } else {
+                ctx.strokeRect(x + borderWidth, y + borderWidth, width - borderWidth * 2, height - borderWidth * 2);
+                ctx.strokeRect(x + borderWidth * 2, y + borderWidth * 2, width - borderWidth * 4, height - borderWidth * 4);
+              }
+              ctx.restore();
+              return; // Skip the main border for double style
+            } else {
+              ctx.setLineDash([]);
+            }
+            
+            if (borderRadius > 0) {
+              drawRoundedRect(x, y, width, height, borderRadius);
+              ctx.stroke();
+            } else {
+              ctx.strokeRect(x, y, width, height);
+            }
+            
+            ctx.restore();
+          }
         } else {
           // Load image if not cached
           const img = new Image();
@@ -1051,7 +1160,11 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
           playlistBorderWidth,
           playlistBorderRadius,
           backgroundColor,
-          elements, // Include custom elements
+          backgroundType,
+          gradientType,
+          gradientColors,
+          gradientDirection,
+          elements, // Include custom elements with borderRadius, borderWidth, borderColor, borderStyle
           textColor: '#FFFFFF', // Default text color
           fontSize: 48, // Default font size
           showTitle,
@@ -1059,7 +1172,8 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
       }
     }
   }, [
-    backgroundColor, elements, title, showTitle, titlePosition, titleFontSize, titleFontFamily,
+    backgroundColor, backgroundType, gradientType, gradientColors, gradientDirection,
+    elements, title, showTitle, titlePosition, titleFontSize, titleFontFamily,
     textColor, titleOpacity, titleBorderColor, titleBorderWidth, titleBorderRadius, showTitleBorder,
     playlist, playlistPosition, playlistFontSize, playlistTextColor,
     playlistOpacity, playlistBorderColor, playlistBorderWidth, playlistBorderRadius, showPlaylistBorder,
@@ -1480,7 +1594,23 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
       {!selectedComponent && (
         <div className="bg-white rounded-lg border border-gray-200 p-6">
           <h3 className="text-lg font-semibold text-gray-900 mb-4">Background</h3>
-          <div className="space-y-4">
+          
+          {/* Background Type */}
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Background Type
+            </label>
+            <select
+              value={backgroundType}
+              onChange={(e) => setBackgroundType(e.target.value as 'solid' | 'gradient')}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+            >
+              <option value="solid">Solid Color</option>
+              <option value="gradient">Gradient</option>
+            </select>
+          </div>
+
+          {backgroundType === 'solid' ? (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Background Color
@@ -1501,7 +1631,107 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
                 />
               </div>
             </div>
-          </div>
+          ) : (
+            <div className="space-y-4">
+              {/* Gradient Type */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Gradient Type
+                </label>
+                <select
+                  value={gradientType}
+                  onChange={(e) => setGradientType(e.target.value as 'linear' | 'radial')}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                >
+                  <option value="linear">Linear</option>
+                  <option value="radial">Radial</option>
+                </select>
+              </div>
+
+              {/* Gradient Colors */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Start Color
+                </label>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="color"
+                    value={gradientColors[0]}
+                    onChange={(e) => setGradientColors([e.target.value, gradientColors[1]])}
+                    className="w-16 h-10 rounded border border-gray-300 cursor-pointer"
+                  />
+                  <input
+                    type="text"
+                    value={gradientColors[0]}
+                    onChange={(e) => setGradientColors([e.target.value, gradientColors[1]])}
+                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    placeholder="#000000"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  End Color
+                </label>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="color"
+                    value={gradientColors[1]}
+                    onChange={(e) => setGradientColors([gradientColors[0], e.target.value])}
+                    className="w-16 h-10 rounded border border-gray-300 cursor-pointer"
+                  />
+                  <input
+                    type="text"
+                    value={gradientColors[1]}
+                    onChange={(e) => setGradientColors([gradientColors[0], e.target.value])}
+                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    placeholder="#1a1a1a"
+                  />
+                </div>
+              </div>
+
+              {gradientType === 'linear' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Direction: {gradientDirection}°
+                  </label>
+                  <input
+                    type="range"
+                    min="0"
+                    max="360"
+                    step="1"
+                    value={gradientDirection}
+                    onChange={(e) => setGradientDirection(Number(e.target.value))}
+                    className="w-full"
+                  />
+                  <div className="flex gap-2 mt-2">
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => setGradientDirection(0)}
+                    >
+                      → Horizontal
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => setGradientDirection(90)}
+                    >
+                      ↓ Vertical
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => setGradientDirection(45)}
+                    >
+                      ↘ Diagonal
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -2024,6 +2254,125 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
                     }}
                     className="w-full"
                   />
+                </div>
+
+                {/* Corner Rounding */}
+                <div className="border-t border-gray-200 pt-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Corner Rounding: {selectedElement.borderRadius || 0}px
+                  </label>
+                  <input
+                    type="range"
+                    min="0"
+                    max="50"
+                    step="1"
+                    value={selectedElement.borderRadius || 0}
+                    onChange={(e) => {
+                      setElements(elements.map(el =>
+                        el.id === selectedElementId
+                          ? { ...el, borderRadius: Number(e.target.value) }
+                          : el
+                      ));
+                    }}
+                    className="w-full"
+                  />
+                  <div className="flex gap-2 mt-2">
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => {
+                        setElements(elements.map(el =>
+                          el.id === selectedElementId
+                            ? { ...el, borderRadius: 0 }
+                            : el
+                        ));
+                      }}
+                    >
+                      Reset
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Frame/Border Options */}
+                <div className="border-t border-gray-200 pt-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Frame Style
+                  </label>
+                  <select
+                    value={selectedElement.borderStyle || 'none'}
+                    onChange={(e) => {
+                      setElements(elements.map(el =>
+                        el.id === selectedElementId
+                          ? { ...el, borderStyle: e.target.value as any }
+                          : el
+                      ));
+                    }}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg mb-3"
+                  >
+                    <option value="none">No Frame</option>
+                    <option value="solid">Solid</option>
+                    <option value="dashed">Dashed</option>
+                    <option value="dotted">Dotted</option>
+                    <option value="double">Double</option>
+                  </select>
+
+                  {selectedElement.borderStyle && selectedElement.borderStyle !== 'none' && (
+                    <>
+                      <div className="mb-3">
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Frame Width: {selectedElement.borderWidth || 0}px
+                        </label>
+                        <input
+                          type="range"
+                          min="0"
+                          max="20"
+                          step="1"
+                          value={selectedElement.borderWidth || 0}
+                          onChange={(e) => {
+                            setElements(elements.map(el =>
+                              el.id === selectedElementId
+                                ? { ...el, borderWidth: Number(e.target.value) }
+                                : el
+                            ));
+                          }}
+                          className="w-full"
+                        />
+                      </div>
+
+                      <div className="mb-3">
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Frame Color
+                        </label>
+                        <div className="flex items-center gap-3">
+                          <input
+                            type="color"
+                            value={selectedElement.borderColor || '#FFFFFF'}
+                            onChange={(e) => {
+                              setElements(elements.map(el =>
+                                el.id === selectedElementId
+                                  ? { ...el, borderColor: e.target.value }
+                                  : el
+                              ));
+                            }}
+                            className="w-12 h-10 border border-gray-300 rounded cursor-pointer"
+                          />
+                          <input
+                            type="text"
+                            value={selectedElement.borderColor || '#FFFFFF'}
+                            onChange={(e) => {
+                              setElements(elements.map(el =>
+                                el.id === selectedElementId
+                                  ? { ...el, borderColor: e.target.value }
+                                  : el
+                              ));
+                            }}
+                            className="flex-1 px-3 py-2 border border-gray-300 rounded-lg"
+                            placeholder="#FFFFFF"
+                          />
+                        </div>
+                      </div>
+                    </>
+                  )}
                 </div>
 
                 {/* Layer Management */}
