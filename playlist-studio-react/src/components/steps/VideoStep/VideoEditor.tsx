@@ -1027,6 +1027,36 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
           backgroundColor,
         });
       }
+
+      // Save ALL settings for export (directly to window.thumbnailSettings)
+      if (typeof window !== 'undefined') {
+        (window as any).thumbnailSettings = {
+          thumbnailUrl: fullUrl,
+          cleanBackgroundUrl: cleanUrl,
+          title,
+          titlePosition,
+          titleFontSize,
+          titleFontFamily,
+          titleOpacity,
+          showTitleBorder,
+          titleBorderColor,
+          titleBorderWidth,
+          titleBorderRadius,
+          playlistPosition,
+          playlistFontSize,
+          playlistTextColor,
+          playlistOpacity,
+          showPlaylistBorder,
+          playlistBorderColor,
+          playlistBorderWidth,
+          playlistBorderRadius,
+          backgroundColor,
+          elements, // Include custom elements
+          textColor: '#FFFFFF', // Default text color
+          fontSize: 48, // Default font size
+          showTitle,
+        };
+      }
     }
   }, [
     backgroundColor, elements, title, showTitle, titlePosition, titleFontSize, titleFontFamily,
@@ -1187,6 +1217,8 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
         <div className="bg-gray-100 rounded-lg p-4 flex justify-center">
           <canvas
             ref={canvasRef}
+            width={1920}
+            height={1080}
             className="max-w-full h-auto border border-gray-300 rounded"
             style={{
               maxHeight: '400px',

@@ -9,6 +9,7 @@ export const ExportPanel: React.FC = () => {
     stitchedAudioUrl,
     feedback,
     downloadStitchedAudio,
+    stepData,
   } = usePlaylist();
   const { showNotification } = useNotifications();
   const [isExportingVideo, setIsExportingVideo] = useState(false);
@@ -137,17 +138,55 @@ export const ExportPanel: React.FC = () => {
       const audioArrayBuffer = await audioBlob.arrayBuffer();
       await ffmpeg.writeFile('audio.wav', new Uint8Array(audioArrayBuffer));
 
-      // Load base background image
-      const img = new Image();
-      img.crossOrigin = 'anonymous';
+      // Get all settings from thumbnailSettings
+      const settings = thumbnailSettings;
+      const {
+        backgroundColor = '#000000',
+        title = 'My Playlist',
+        showTitle = true,
+        titlePosition = { x: 50, y: 33.33 },
+        titleFontSize = 48,
+        titleFontFamily = 'Arial',
+        titleOpacity = 1,
+        showTitleBorder = false,
+        titleBorderColor = '#FFFFFF',
+        titleBorderWidth = 2,
+        titleBorderRadius = 0,
+        playlistPosition = { x: 50, y: 50 },
+        playlistFontSize = 36,
+        playlistTextColor = '#FFFFFF',
+        playlistOpacity = 1,
+        showPlaylistBorder = false,
+        playlistBorderColor = '#FFFFFF',
+        playlistBorderWidth = 2,
+        playlistBorderRadius = 0,
+        elements = [], // Custom elements (text, images)
+        textColor = '#FFFFFF',
+        fontSize = 48,
+      } = settings;
 
-      // Use clean background if available (prevents double-playlist effect)
-      const imageSrc = thumbnailSettings.cleanBackgroundUrl || thumbnailSettings.thumbnailUrl;
+      // Preload all images for custom elements
+      const imageMap = new Map<string, HTMLImageElement>();
+      const imagePromises = elements
+        .filter((el: any) => el.type === 'image' && el.imageUrl)
+        .map((el: any) => {
+          return new Promise<{ id: string; img: HTMLImageElement }>((resolve, reject) => {
+            const img = new Image();
+            img.crossOrigin = 'anonymous';
+            img.onload = () => resolve({ id: el.id, img });
+            img.onerror = () => {
+              console.warn('Failed to load image:', el.imageUrl);
+              resolve({ id: el.id, img: new Image() }); // Resolve with empty image to continue
+            };
+            img.src = el.imageUrl;
+          });
+        });
 
-      await new Promise((resolve, reject) => {
-        img.onload = resolve;
-        img.onerror = reject;
-        img.src = imageSrc;
+      await Promise.all(imagePromises);
+      imagePromises.forEach(({ id, img }) => {
+        if (img.complete) {
+          imageMap.set(id, img);
+        }
       });
 
       // Prepare canvas for drawing frames
@@ -157,54 +196,224 @@ export const ExportPanel: React.FC = () => {
       const ctx = canvas.getContext('2d');
       if (!ctx) throw new Error('Could not create canvas context');
 
-      // Helper to draw a single frame
+      // Helper to calculate song start times (matching VideoEditor logic)
+      const calculateSongStartTimes = () => {
+        const parseDuration = (durationStr: string): number => {
+          if (!durationStr) return 180;
+          const parts = durationStr.split(':');
+          if (parts.length === 2) {
+            const minutes = parseInt(parts[0], 10);
+            const seconds = parseInt(parts[1], 10);
+            if (isNaN(minutes) || isNaN(seconds)) return 180;
+            return minutes * 60 + seconds;
+          }
+          return 180;
+        };
+
+        const delayBetweenSongs = stepData[2]?.stitchSettings?.delayBetweenSongs ?? 0;
+        let accumulatedTime = 0;
+        return playlist.map((song, index) => {
+          const startTime = accumulatedTime;
+          const songDuration = song.duration ? parseDuration(song.duration) : 180;
+          const endTime = accumulatedTime + songDuration;
+          accumulatedTime = endTime;
+          if (index < playlist.length - 1 && delayBetweenSongs > 0) {
+            accumulatedTime += delayBetweenSongs;
+          }
+          
+          const minutes = Math.floor(startTime / 60);
+          const seconds = Math.floor(startTime % 60);
+          return {
+            songId: song.id,
+            startTime,
+            endTime,
+            formattedTime: `${minutes}:${seconds.toString().padStart(2, '0')}`
+          };
+        });
+      };
+
+      // Helper to draw a single frame with EXACT same logic as VideoEditor
       const drawFrame = (highlightIndex: number) => {
-        // Draw base image
-        ctx.globalAlpha = 1.0;
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        // Clear canvas
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-        // Draw playlist with highlight
-        const playlistPosition = thumbnailSettings.playlistPosition || { x: 10, y: 50 };
-        const maxItems = 8;
-        const itemsToShow = playlist.slice(0, maxItems);
-        const playlistX = (canvas.width * playlistPosition.x) / 100;
-        const playlistY = (canvas.height * playlistPosition.y) / 100;
-        const itemHeight = 60;
-        const spacing = 20;
+        // Fill background
+        ctx.fillStyle = backgroundColor;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-        ctx.font = '36px Arial';
-        ctx.textAlign = 'left';
-        ctx.textBaseline = 'top';
+        // Draw title if enabled
+        if (showTitle && title) {
+          ctx.save();
+          ctx.globalAlpha = titleOpacity;
+          ctx.fillStyle = textColor;
+          ctx.font = `bold ${titleFontSize}px ${titleFontFamily}`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          const titleX = (canvas.width * titlePosition.x) / 100;
+          const titleY = (canvas.height * titlePosition.y) / 100;
 
-        itemsToShow.forEach((song, index) => {
-          const y = playlistY + (index * (itemHeight + spacing));
-          const isCurrentSong = index === highlightIndex; // Simple index matching for now (since no scrolling)
+          const metrics = ctx.measureText(title);
+          const textWidth = metrics.width;
+          const textHeight = titleFontSize;
 
-          // Format start time - simple calculation for display
-          // Note: In a real implementation we might want to pass exact start times, 
-          // but for visual consistency with preview, recalculating is fine.
-          // We only need the text to look right.
+          // Draw border around title if enabled
+          if (showTitleBorder) {
+            ctx.strokeStyle = titleBorderColor;
+            ctx.lineWidth = titleBorderWidth;
+            ctx.beginPath();
+            const padding = 10;
+            const borderX = titleX - textWidth / 2 - padding;
+            const borderY = titleY - textHeight / 2 - padding;
+            const borderWidth = textWidth + (padding * 2);
+            const borderHeight = textHeight + (padding * 2);
 
-          // Draw highlight background
-          if (isCurrentSong) {
-            ctx.fillStyle = 'rgba(59, 130, 246, 0.3)';
-            ctx.fillRect(playlistX - 10, y - 5, canvas.width * 0.8 + 20, itemHeight + 10);
+            if (titleBorderRadius > 0) {
+              const radius = titleBorderRadius;
+              ctx.moveTo(borderX + radius, borderY);
+              ctx.lineTo(borderX + borderWidth - radius, borderY);
+              ctx.quadraticCurveTo(borderX + borderWidth, borderY, borderX + borderWidth, borderY + radius);
+              ctx.lineTo(borderX + borderWidth, borderY + borderHeight - radius);
+              ctx.quadraticCurveTo(borderX + borderWidth, borderY + borderHeight, borderX + borderWidth - radius, borderY + borderHeight);
+              ctx.lineTo(borderX + radius, borderY + borderHeight);
+              ctx.quadraticCurveTo(borderX, borderY + borderHeight, borderX, borderY + borderHeight - radius);
+              ctx.lineTo(borderX, borderY + radius);
+              ctx.quadraticCurveTo(borderX, borderY, borderX + radius, borderY);
+            } else {
+              ctx.rect(borderX, borderY, borderWidth, borderHeight);
+            }
+            ctx.stroke();
           }
 
-          // Draw text
-          ctx.fillStyle = isCurrentSong ? '#3b82f6' : '#FFFFFF';
-          const songText = `${index + 1}. ${song.title}${song.artist ? ` - ${song.artist}` : ''}`;
+          ctx.fillText(title, titleX, titleY);
+          ctx.restore();
+        }
 
-          // We need to fetch the approximate start time for display text
-          // Ideally we pre-calculate this, but for simplicity we can estimate:
-          // This is just visual text, the video timing is handled by concat file.
-          // ... actually, we can skip the timestamp text or just render it if we have it?
-          // The preview renders `[start:time]`. Let's try to include it.
-          // For now, drawing the title is the priority.
+        // Draw custom elements (text, images)
+        elements.forEach((element: any) => {
+          ctx.save();
+          ctx.globalAlpha = element.opacity !== undefined ? element.opacity : 1;
+          const halfWidth = (element.width || 0) / 2;
+          const halfHeight = (element.height || 0) / 2;
 
-          const maxWidth = canvas.width * 0.8;
-          ctx.fillText(songText, playlistX, y, maxWidth);
+          if (element.type === 'text') {
+            ctx.fillStyle = element.color || textColor;
+            const elementFontSize = element.fontSize || fontSize;
+            const elementFontFamily = element.fontFamily || 'Arial';
+            ctx.font = `${elementFontSize}px ${elementFontFamily}`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(element.text || '', element.x, element.y);
+          } else if (element.type === 'image' && element.imageUrl) {
+            const cachedImg = imageMap.get(element.id);
+            if (cachedImg && cachedImg.complete) {
+              ctx.drawImage(cachedImg, element.x - halfWidth, element.y - halfHeight, element.width || 200, element.height || 200);
+            }
+          }
+          ctx.restore();
         });
+
+        // Draw playlist items with 2-column layout (matching VideoEditor)
+        if (playlist.length > 0) {
+          ctx.save();
+          ctx.globalAlpha = playlistOpacity;
+
+          const maxItems = 10;
+          const itemsToShow = playlist.slice(0, maxItems);
+          const columnWidth = canvas.width * 0.35;
+          const columnSpacing = canvas.width * 0.1;
+          const songsPerColumn = 5;
+
+          // Calculate playlist position (matching VideoEditor logic)
+          const totalPlaylistWidth = (columnWidth * 2) + columnSpacing;
+          const playlistX = playlistPosition.x === 50
+            ? (canvas.width - totalPlaylistWidth) / 2
+            : (canvas.width * playlistPosition.x) / 100 - (totalPlaylistWidth / 2);
+          const playlistY = (canvas.height * playlistPosition.y) / 100;
+
+          // Calculate start times for songs
+          const songStartTimes = calculateSongStartTimes();
+          const startTimesMap = new Map(songStartTimes.map(st => [st.songId, st.formattedTime]));
+
+          ctx.font = `${playlistFontSize}px Arial`;
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'top';
+
+          const adjustedItemHeight = playlistFontSize * 1.5;
+          const adjustedSpacing = playlistFontSize * 0.5;
+
+          // Draw border around entire playlist if enabled
+          if (showPlaylistBorder) {
+            const playlistHeight = songsPerColumn * (adjustedItemHeight + adjustedSpacing);
+            const playlistWidth = columnWidth * 2 + columnSpacing;
+
+            ctx.strokeStyle = playlistBorderColor;
+            ctx.lineWidth = playlistBorderWidth;
+            ctx.beginPath();
+            if (playlistBorderRadius > 0) {
+              const radius = playlistBorderRadius;
+              ctx.moveTo(playlistX + radius, playlistY);
+              ctx.lineTo(playlistX + playlistWidth - radius, playlistY);
+              ctx.quadraticCurveTo(playlistX + playlistWidth, playlistY, playlistX + playlistWidth, playlistY + radius);
+              ctx.lineTo(playlistX + playlistWidth, playlistY + playlistHeight - radius);
+              ctx.quadraticCurveTo(playlistX + playlistWidth, playlistY + playlistHeight, playlistX + playlistWidth - radius, playlistY + playlistHeight);
+              ctx.lineTo(playlistX + radius, playlistY + playlistHeight);
+              ctx.quadraticCurveTo(playlistX, playlistY + playlistHeight, playlistX, playlistY + playlistHeight - radius);
+              ctx.lineTo(playlistX, playlistY + radius);
+              ctx.quadraticCurveTo(playlistX, playlistY, playlistX + radius, playlistY);
+            } else {
+              ctx.rect(playlistX, playlistY, playlistWidth, playlistHeight);
+            }
+            ctx.stroke();
+          }
+
+          itemsToShow.forEach((song, index) => {
+            const column = Math.floor(index / songsPerColumn);
+            const rowInColumn = index % songsPerColumn;
+
+            const x = playlistX + (column * (columnWidth + columnSpacing));
+            const y = playlistY + (rowInColumn * (adjustedItemHeight + adjustedSpacing));
+
+            const startTime = startTimesMap.get(song.id) || '0:00';
+            const isCurrentSong = index === highlightIndex;
+
+            // Draw highlight background for current song
+            if (isCurrentSong) {
+              ctx.fillStyle = 'rgba(59, 130, 246, 0.3)';
+              ctx.fillRect(
+                x - 10,
+                y - 5,
+                columnWidth + 20,
+                adjustedItemHeight + 10
+              );
+            }
+
+            // Draw song text
+            ctx.fillStyle = isCurrentSong ? '#3b82f6' : playlistTextColor;
+            const songText = `${index + 1}. ${song.title}${song.artist ? ` - ${song.artist}` : ''}`;
+            const timestampText = `[${startTime}]`;
+
+            const songTextWidth = ctx.measureText(songText).width;
+            const maxWidth = columnWidth - 100;
+
+            ctx.fillText(songText, x, y, maxWidth);
+
+            // Draw timestamp
+            const timestampFontSize = Math.max(20, playlistFontSize * 0.75);
+            ctx.font = `${timestampFontSize}px Arial`;
+            ctx.fillStyle = isCurrentSong ? '#3b82f6' : playlistTextColor;
+            ctx.globalAlpha = playlistOpacity * 0.8;
+            ctx.fillText(
+              timestampText,
+              x + Math.min(songTextWidth, maxWidth) + 10,
+              y + 4,
+              columnWidth * 0.3
+            );
+            ctx.globalAlpha = playlistOpacity;
+            ctx.font = `${playlistFontSize}px Arial`;
+          });
+
+          ctx.restore();
+        }
       };
 
       // Calculate durations for each song
