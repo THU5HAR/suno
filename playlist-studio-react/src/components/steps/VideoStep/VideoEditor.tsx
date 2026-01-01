@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useImperativeHandle, forwardRef, useCallback } from 'react';
+import { useState, useRef, useEffect, useImperativeHandle, forwardRef, useCallback, useMemo } from 'react';
 import { usePlaylist } from '@/context/PlaylistContext';
 import { Button } from '@/components/ui/Button';
 import { useNotifications } from '@/context/NotificationContext';
@@ -44,7 +44,7 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
   const [playlistBorderRadius, setPlaylistBorderRadius] = useState(0); // Border radius (rounded corners)
   const [isDraggingPlaylist, setIsDraggingPlaylist] = useState(false);
   const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null);
-  const [elements, setElements] = useState<Array<{ id: string; type: string; x: number; y: number; width?: number; height?: number; color?: string; text?: string; imageUrl?: string; fontSize?: number; fontFamily?: string; opacity?: number; borderRadius?: number; borderWidth?: number; borderColor?: string; borderStyle?: 'solid' | 'dashed' | 'dotted' | 'double' | 'none' }>>([]);
+  const [elements, setElements] = useState<Array<{ id: string; type: string; x: number; y: number; width?: number; height?: number; color?: string; text?: string; imageUrl?: string; fontSize?: number; fontFamily?: string; opacity?: number; borderRadius?: number; borderWidth?: number; borderColor?: string; borderStyle?: 'solid' | 'dashed' | 'dotted' | 'double' | 'none'; frameShape?: 'none' | 'circular' | 'cloud' | 'star' | 'heart' | 'diamond' }>>([]);
   const [titleOpacity, setTitleOpacity] = useState(1);
   const [playlistOpacity, setPlaylistOpacity] = useState(1);
   const [selectedElementId, setSelectedElementId] = useState<string | null>(null);
@@ -198,6 +198,7 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
         width: 200,
         height: 200,
         imageUrl: imageUrl,
+        frameShape: 'none',
         opacity: 1, // Default to full opacity
       };
       setElements([...elements, newElement]);
@@ -611,25 +612,26 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
   }, []);
 
   // Request animation frame for smooth rendering during drag/resize
-  const requestRender = () => {
+  const requestRender = useCallback(() => {
     if (renderRequestRef.current) {
       cancelAnimationFrame(renderRequestRef.current);
     }
     renderRequestRef.current = requestAnimationFrame(() => {
       renderThumbnail();
+      renderRequestRef.current = null;
     });
-  };
+  }, []);
 
-  // Smooth render during resize/drag operations
-  const requestSmoothRender = () => {
+  // Smooth render during resize/drag operations (throttled)
+  const requestSmoothRender = useCallback(() => {
     if (animationFrameRef.current) {
-      cancelAnimationFrame(animationFrameRef.current);
+      return; // Already scheduled
     }
     animationFrameRef.current = requestAnimationFrame(() => {
       renderThumbnail();
       animationFrameRef.current = null;
     });
-  };
+  }, []);
 
   // Update playback time from audio and get actual duration
   useEffect(() => {
@@ -676,19 +678,58 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
     };
   }, [isDraggingTimeline, stitchedAudioUrl]);
 
-  useEffect(() => {
-    requestRender();
-  }, [backgroundColor, textColor, fontSize, showTitle, title, titleFontSize, titlePosition, titleFontFamily, showTitleBorder, titleBorderColor, titleBorderWidth, titleBorderRadius, titleOpacity, playlistPosition, playlistFontSize, playlistTextColor, showPlaylistBorder, playlistBorderColor, playlistBorderWidth, playlistBorderRadius, playlistOpacity, playlist, elements, selectedElementId, selectedComponent, isDraggingTitle, isDraggingPlaylist, currentPlaybackTime]);
+  // Debounce render requests to avoid excessive re-renders
+  const renderTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const lastRenderTimeRef = useRef(0);
 
-  // Re-render during drag/resize
+  const scheduleRender = useCallback(() => {
+    const now = Date.now();
+    const timeSinceLastRender = now - lastRenderTimeRef.current;
+    
+    if (renderTimeoutRef.current) {
+      clearTimeout(renderTimeoutRef.current);
+    }
+    
+    // Throttle to max 60fps (16ms)
+    if (timeSinceLastRender < 16) {
+      renderTimeoutRef.current = setTimeout(() => {
+        requestRender();
+        lastRenderTimeRef.current = Date.now();
+      }, 16 - timeSinceLastRender);
+    } else {
+      requestRender();
+      lastRenderTimeRef.current = now;
+    }
+  }, [requestRender]);
+
+  // Render on property changes (debounced) - EXCLUDE currentPlaybackTime to avoid constant re-renders
+  useEffect(() => {
+    if (!isDragging && !isResizing && !isDraggingTitle && !isDraggingPlaylist) {
+      scheduleRender();
+    }
+  }, [backgroundColor, backgroundType, gradientType, gradientColors, gradientDirection, textColor, fontSize, showTitle, title, titleFontSize, titlePosition, titleFontFamily, showTitleBorder, titleBorderColor, titleBorderWidth, titleBorderRadius, titleOpacity, playlistPosition, playlistFontSize, playlistTextColor, showPlaylistBorder, playlistBorderColor, playlistBorderWidth, playlistBorderRadius, playlistOpacity, playlist, elements, selectedElementId, selectedComponent, scheduleRender, isDragging, isResizing, isDraggingTitle, isDraggingPlaylist]);
+
+  // Separate effect for playback time updates (only render if needed for visual feedback)
+  useEffect(() => {
+    // Only re-render during playback if we need to highlight current song
+    if (isPlaying && playlist.length > 0) {
+      // Throttle to ~30fps for playback updates
+      const timeout = setTimeout(() => {
+        requestRender();
+      }, 33);
+      return () => clearTimeout(timeout);
+    }
+  }, [currentPlaybackTime, isPlaying, playlist.length, requestRender]);
+
+  // Re-render during drag/resize (immediate, no debounce)
   useEffect(() => {
     if (isDragging || isResizing || isDraggingTitle || isDraggingPlaylist) {
-      requestRender();
+      requestSmoothRender();
     }
   }, [isDragging, isResizing, isDraggingTitle, isDraggingPlaylist]);
 
-  // Render the thumbnail on canvas
-  const renderThumbnail = (hidePlaylist = false): string | null => {
+  // Render the thumbnail on canvas (optimized with useCallback)
+  const renderThumbnail = useCallback((hidePlaylist = false): string | null => {
     const canvas = canvasRef.current;
     if (!canvas) return null;
 
@@ -833,6 +874,7 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
           const borderWidth = element.borderWidth || 0;
           const borderColor = element.borderColor || '#FFFFFF';
           const borderStyle = element.borderStyle || 'none';
+          const frameShape = element.frameShape || 'none';
 
           ctx.save();
           
@@ -850,10 +892,93 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
             ctx.quadraticCurveTo(x, y, x + r, y);
             ctx.closePath();
           };
+
+          // Helper functions for decorative frame shapes
+          const drawCircularFrame = (cx: number, cy: number, radius: number) => {
+            ctx.beginPath();
+            ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+            ctx.closePath();
+          };
+
+          const drawCloudFrame = (x: number, y: number, w: number, h: number) => {
+            const centerX = x + w / 2;
+            const centerY = y + h / 2;
+            const radiusX = w / 2;
+            const radiusY = h / 2;
+            ctx.beginPath();
+            // Create cloud-like shape with multiple arcs
+            ctx.arc(centerX - radiusX * 0.3, centerY - radiusY * 0.2, radiusX * 0.4, 0, Math.PI * 2);
+            ctx.arc(centerX + radiusX * 0.3, centerY - radiusY * 0.2, radiusX * 0.4, 0, Math.PI * 2);
+            ctx.arc(centerX - radiusX * 0.1, centerY, radiusX * 0.5, 0, Math.PI * 2);
+            ctx.arc(centerX + radiusX * 0.1, centerY, radiusX * 0.5, 0, Math.PI * 2);
+            ctx.arc(centerX, centerY + radiusY * 0.3, radiusX * 0.45, 0, Math.PI * 2);
+            ctx.closePath();
+          };
+
+          const drawStarFrame = (cx: number, cy: number, outerRadius: number, innerRadius: number, points: number = 5) => {
+            ctx.beginPath();
+            for (let i = 0; i < points * 2; i++) {
+              const radius = i % 2 === 0 ? outerRadius : innerRadius;
+              const angle = (i * Math.PI) / points - Math.PI / 2;
+              const px = cx + radius * Math.cos(angle);
+              const py = cy + radius * Math.sin(angle);
+              if (i === 0) {
+                ctx.moveTo(px, py);
+              } else {
+                ctx.lineTo(px, py);
+              }
+            }
+            ctx.closePath();
+          };
+
+          const drawHeartFrame = (x: number, y: number, w: number, h: number) => {
+            const centerX = x + w / 2;
+            const centerY = y + h / 2;
+            const size = Math.min(w, h) / 2;
+            ctx.beginPath();
+            // Left curve
+            ctx.arc(centerX - size * 0.25, centerY - size * 0.1, size * 0.5, 0, Math.PI);
+            // Right curve
+            ctx.arc(centerX + size * 0.25, centerY - size * 0.1, size * 0.5, 0, Math.PI);
+            // Bottom point
+            ctx.lineTo(centerX, centerY + size * 0.8);
+            ctx.closePath();
+          };
+
+          const drawDiamondFrame = (x: number, y: number, w: number, h: number) => {
+            const centerX = x + w / 2;
+            const centerY = y + h / 2;
+            ctx.beginPath();
+            ctx.moveTo(centerX, y);
+            ctx.lineTo(x + w, centerY);
+            ctx.lineTo(centerX, y + h);
+            ctx.lineTo(x, centerY);
+            ctx.closePath();
+          };
+
+          // Determine clipping path based on frame shape
+          let clipPath: (() => void) | null = null;
+          const centerX = element.x;
+          const centerY = element.y;
+          if (frameShape === 'circular') {
+            const radius = Math.min(width, height) / 2;
+            clipPath = () => drawCircularFrame(centerX, centerY, radius);
+          } else if (frameShape === 'cloud') {
+            clipPath = () => drawCloudFrame(x, y, width, height);
+          } else if (frameShape === 'star') {
+            const radius = Math.min(width, height) / 2;
+            clipPath = () => drawStarFrame(centerX, centerY, radius, radius * 0.4);
+          } else if (frameShape === 'heart') {
+            clipPath = () => drawHeartFrame(x, y, width, height);
+          } else if (frameShape === 'diamond') {
+            clipPath = () => drawDiamondFrame(x, y, width, height);
+          } else if (borderRadius > 0) {
+            clipPath = () => drawRoundedRect(x, y, width, height, borderRadius);
+          }
           
-          // Create clipping path for rounded corners
-          if (borderRadius > 0) {
-            drawRoundedRect(x, y, width, height, borderRadius);
+          // Apply clipping path if needed
+          if (clipPath) {
+            clipPath();
             ctx.clip();
           }
           
@@ -862,8 +987,39 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
           
           ctx.restore();
           
-          // Draw border/frame
-          if (borderWidth > 0 && borderStyle !== 'none') {
+          // Draw decorative frame shape
+          if (frameShape !== 'none') {
+            ctx.save();
+            ctx.strokeStyle = borderColor || '#FFFFFF';
+            ctx.lineWidth = borderWidth || 5;
+            ctx.fillStyle = 'transparent';
+            const centerX = element.x;
+            const centerY = element.y;
+            
+            if (frameShape === 'circular') {
+              const radius = Math.min(width, height) / 2;
+              drawCircularFrame(centerX, centerY, radius);
+              ctx.stroke();
+            } else if (frameShape === 'cloud') {
+              drawCloudFrame(x, y, width, height);
+              ctx.stroke();
+            } else if (frameShape === 'star') {
+              const radius = Math.min(width, height) / 2;
+              drawStarFrame(centerX, centerY, radius, radius * 0.4);
+              ctx.stroke();
+            } else if (frameShape === 'heart') {
+              drawHeartFrame(x, y, width, height);
+              ctx.stroke();
+            } else if (frameShape === 'diamond') {
+              drawDiamondFrame(x, y, width, height);
+              ctx.stroke();
+            }
+            
+            ctx.restore();
+          }
+          
+          // Draw border/frame (only if frameShape is none)
+          if (frameShape === 'none' && borderWidth > 0 && borderStyle !== 'none') {
             ctx.save();
             ctx.strokeStyle = borderColor;
             ctx.lineWidth = borderWidth;
@@ -906,7 +1062,7 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
           img.crossOrigin = 'anonymous';
           img.onload = () => {
             loadedImagesRef.current.set(element.id, img);
-            requestRender();
+            scheduleRender();
           };
           img.onerror = () => {
             showNotification('Failed to load image', 'error');
@@ -1100,7 +1256,7 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
     }
 
     return canvas.toDataURL('image/png');
-  };
+  }, [backgroundColor, backgroundType, gradientType, gradientColors, gradientDirection, showTitle, title, titleFontSize, titlePosition, titleFontFamily, showTitleBorder, titleBorderColor, titleBorderWidth, titleBorderRadius, titleOpacity, playlistPosition, playlistFontSize, playlistTextColor, showPlaylistBorder, playlistBorderColor, playlistBorderWidth, playlistBorderRadius, playlistOpacity, playlist, elements, currentPlaybackTime, textColor, fontSize]);
 
   // Effect to re-render when dependencies change
   useEffect(() => {
@@ -1164,7 +1320,7 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
           gradientType,
           gradientColors,
           gradientDirection,
-          elements, // Include custom elements with borderRadius, borderWidth, borderColor, borderStyle
+          elements, // Include custom elements with borderRadius, borderWidth, borderColor, borderStyle, frameShape
           textColor: '#FFFFFF', // Default text color
           fontSize: 48, // Default font size
           showTitle,
@@ -2116,9 +2272,10 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
                   </select>
                 </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Text Color
+                {/* Text Color - More Prominent */}
+                <div className="border-t border-gray-200 pt-4">
+                  <label className="block text-sm font-semibold text-gray-900 mb-3">
+                    🎨 Text Color
                   </label>
                   <div className="flex items-center gap-3">
                     <input
@@ -2131,7 +2288,8 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
                             : el
                         ));
                       }}
-                      className="w-16 h-10 rounded border border-gray-300 cursor-pointer"
+                      className="w-16 h-12 rounded border-2 border-gray-300 cursor-pointer"
+                      title="Pick text color"
                     />
                     <input
                       type="text"
@@ -2143,10 +2301,13 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
                             : el
                         ));
                       }}
-                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                      className="flex-1 px-3 py-2 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent font-mono"
                       placeholder="#FFFFFF"
                     />
                   </div>
+                  <p className="text-xs text-gray-500 mt-2">
+                    💡 Change the color of your text element
+                  </p>
                 </div>
 
                 <div>
@@ -2293,28 +2454,120 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
                   </div>
                 </div>
 
-                {/* Frame/Border Options */}
+                {/* Decorative Frame Shapes */}
+                <div className="border-t border-gray-200 pt-4">
+                  <label className="block text-sm font-semibold text-gray-900 mb-3">
+                    🖼️ Decorative Frame Shapes
+                  </label>
+                  <select
+                    value={selectedElement.frameShape || 'none'}
+                    onChange={(e) => {
+                      setElements(elements.map(el =>
+                        el.id === selectedElementId
+                          ? { ...el, frameShape: e.target.value as any }
+                          : el
+                      ));
+                    }}
+                    className="w-full px-3 py-2 border-2 border-gray-300 rounded-lg mb-3"
+                  >
+                    <option value="none">No Decorative Frame</option>
+                    <option value="circular">⭕ Circular</option>
+                    <option value="cloud">☁️ Cloud</option>
+                    <option value="star">⭐ Star</option>
+                    <option value="heart">❤️ Heart</option>
+                    <option value="diamond">💎 Diamond</option>
+                  </select>
+                  <p className="text-xs text-gray-500 mb-3">
+                    💡 Choose a decorative frame shape to wrap around your image
+                  </p>
+
+                  {selectedElement.frameShape && selectedElement.frameShape !== 'none' && (
+                    <>
+                      <div className="mb-3">
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Frame Width: {selectedElement.borderWidth || 5}px
+                        </label>
+                        <input
+                          type="range"
+                          min="2"
+                          max="20"
+                          step="1"
+                          value={selectedElement.borderWidth || 5}
+                          onChange={(e) => {
+                            setElements(elements.map(el =>
+                              el.id === selectedElementId
+                                ? { ...el, borderWidth: Number(e.target.value) }
+                                : el
+                            ));
+                          }}
+                          className="w-full"
+                        />
+                      </div>
+
+                      <div className="mb-3">
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Frame Color
+                        </label>
+                        <div className="flex items-center gap-3">
+                          <input
+                            type="color"
+                            value={selectedElement.borderColor || '#FFFFFF'}
+                            onChange={(e) => {
+                              setElements(elements.map(el =>
+                                el.id === selectedElementId
+                                  ? { ...el, borderColor: e.target.value }
+                                  : el
+                              ));
+                            }}
+                            className="w-12 h-10 border border-gray-300 rounded cursor-pointer"
+                          />
+                          <input
+                            type="text"
+                            value={selectedElement.borderColor || '#FFFFFF'}
+                            onChange={(e) => {
+                              setElements(elements.map(el =>
+                                el.id === selectedElementId
+                                  ? { ...el, borderColor: e.target.value }
+                                  : el
+                              ));
+                            }}
+                            className="flex-1 px-3 py-2 border border-gray-300 rounded-lg"
+                            placeholder="#FFFFFF"
+                          />
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                {/* Border Style (for non-decorative frames) */}
                 <div className="border-t border-gray-200 pt-4">
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Frame Style
+                    Border Style (Simple)
                   </label>
                   <select
                     value={selectedElement.borderStyle || 'none'}
                     onChange={(e) => {
                       setElements(elements.map(el =>
                         el.id === selectedElementId
-                          ? { ...el, borderStyle: e.target.value as any }
+                          ? { ...el, borderStyle: e.target.value as any, frameShape: e.target.value !== 'none' ? undefined : el.frameShape }
                           : el
                       ));
                     }}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg mb-3"
+                    disabled={selectedElement.frameShape && selectedElement.frameShape !== 'none'}
                   >
-                    <option value="none">No Frame</option>
+                    <option value="none">No Border</option>
                     <option value="solid">Solid</option>
                     <option value="dashed">Dashed</option>
                     <option value="dotted">Dotted</option>
                     <option value="double">Double</option>
                   </select>
+                  {selectedElement.frameShape && selectedElement.frameShape !== 'none' && (
+                    <p className="text-xs text-gray-500 mb-3">
+                      💡 Disabled when decorative frame is active
+                    </p>
+                  )}
 
                   {selectedElement.borderStyle && selectedElement.borderStyle !== 'none' && (
                     <>
