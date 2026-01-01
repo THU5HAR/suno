@@ -60,6 +60,10 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
   const [isDraggingTimeline, setIsDraggingTimeline] = useState(false);
   const [actualAudioDuration, setActualAudioDuration] = useState(0);
   const [canvasCursor, setCanvasCursor] = useState<string>('default');
+  const [isRecording, setIsRecording] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const audioSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
 
   // Generate unique ID
   const generateId = () => `element_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -766,445 +770,1071 @@ export const VideoEditor = forwardRef<VideoEditorRef, VideoEditorProps>(({ onThu
 
     // Draw images and other elements
 
-  // Draw custom elements
-  elements.forEach((element) => {
-    ctx.save();
-    // Apply opacity
-    ctx.globalAlpha = element.opacity !== undefined ? element.opacity : 1;
-    const isSelected = element.id === selectedElementId;
-    const halfWidth = (element.width || 0) / 2;
-    const halfHeight = (element.height || 0) / 2;
+    // Draw custom elements
+    elements.forEach((element) => {
+      ctx.save();
+      // Apply opacity
+      ctx.globalAlpha = element.opacity !== undefined ? element.opacity : 1;
+      const isSelected = element.id === selectedElementId;
+      const halfWidth = (element.width || 0) / 2;
+      const halfHeight = (element.height || 0) / 2;
 
-    if (element.type === 'text') {
-      ctx.fillStyle = element.color || textColor;
-      const elementFontSize = element.fontSize || fontSize;
-      const elementFontFamily = element.fontFamily || 'Arial';
-      ctx.font = `${elementFontSize}px ${elementFontFamily}`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(element.text || '', element.x, element.y);
-    } else if (element.type === 'image' && element.imageUrl) {
-      const cachedImg = loadedImagesRef.current.get(element.id);
-      if (cachedImg && cachedImg.complete) {
-        ctx.drawImage(cachedImg, element.x - halfWidth, element.y - halfHeight, element.width || 200, element.height || 200);
-      } else {
-        // Load image if not cached
-        const img = new Image();
-        img.crossOrigin = 'anonymous';
-        img.onload = () => {
-          loadedImagesRef.current.set(element.id, img);
-          requestRender();
-        };
-        img.onerror = () => {
-          showNotification('Failed to load image', 'error');
-        };
-        img.src = element.imageUrl;
+      if (element.type === 'text') {
+        ctx.fillStyle = element.color || textColor;
+        const elementFontSize = element.fontSize || fontSize;
+        const elementFontFamily = element.fontFamily || 'Arial';
+        ctx.font = `${elementFontSize}px ${elementFontFamily}`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(element.text || '', element.x, element.y);
+      } else if (element.type === 'image' && element.imageUrl) {
+        const cachedImg = loadedImagesRef.current.get(element.id);
+        if (cachedImg && cachedImg.complete) {
+          ctx.drawImage(cachedImg, element.x - halfWidth, element.y - halfHeight, element.width || 200, element.height || 200);
+        } else {
+          // Load image if not cached
+          const img = new Image();
+          img.crossOrigin = 'anonymous';
+          img.onload = () => {
+            loadedImagesRef.current.set(element.id, img);
+            requestRender();
+          };
+          img.onerror = () => {
+            showNotification('Failed to load image', 'error');
+          };
+          img.src = element.imageUrl;
+        }
       }
-    }
 
-    // Draw selection border and resize handles (always at full opacity for visibility)
-    if (isSelected && element.width && element.height) {
-      ctx.globalAlpha = 1.0; // Full opacity for selection indicators
-      ctx.strokeStyle = '#3b82f6';
-      ctx.lineWidth = 2;
-      ctx.setLineDash([5, 5]);
-      ctx.strokeRect(element.x - halfWidth, element.y - halfHeight, element.width, element.height);
-      ctx.setLineDash([]);
+      // Draw selection border and resize handles (always at full opacity for visibility)
+      if (isSelected && element.width && element.height) {
+        ctx.globalAlpha = 1.0; // Full opacity for selection indicators
+        ctx.strokeStyle = '#3b82f6';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([5, 5]);
+        ctx.strokeRect(element.x - halfWidth, element.y - halfHeight, element.width, element.height);
+        ctx.setLineDash([]);
 
-      // Draw resize handles
-      ctx.fillStyle = '#3b82f6';
-      const handleSize = 8;
-      const handles = [
-        { x: element.x - halfWidth, y: element.y - halfHeight }, // nw
-        { x: element.x + halfWidth, y: element.y - halfHeight }, // ne
-        { x: element.x - halfWidth, y: element.y + halfHeight }, // sw
-        { x: element.x + halfWidth, y: element.y + halfHeight }, // se
-      ];
+        // Draw resize handles
+        ctx.fillStyle = '#3b82f6';
+        const handleSize = 8;
+        const handles = [
+          { x: element.x - halfWidth, y: element.y - halfHeight }, // nw
+          { x: element.x + halfWidth, y: element.y - halfHeight }, // ne
+          { x: element.x - halfWidth, y: element.y + halfHeight }, // sw
+          { x: element.x + halfWidth, y: element.y + halfHeight }, // se
+        ];
 
-      handles.forEach(handle => {
-        ctx.fillRect(handle.x - handleSize / 2, handle.y - handleSize / 2, handleSize, handleSize);
+        handles.forEach(handle => {
+          ctx.fillRect(handle.x - handleSize / 2, handle.y - handleSize / 2, handleSize, handleSize);
+        });
+      }
+
+      ctx.restore();
+    });
+
+    // Draw playlist items (always show when playlist has songs, unless hidden for clean export)
+    if (playlist.length > 0 && !hidePlaylist) {
+      ctx.save();
+      ctx.globalAlpha = playlistOpacity;
+
+      const maxItems = 10;
+      const itemsToShow = playlist.slice(0, maxItems);
+      const columnWidth = canvas.width * 0.35; // Width for each column
+      const columnSpacing = canvas.width * 0.1; // Space between columns
+      const songsPerColumn = 5;
+
+      // Calculate playlist position (centered by default, but movable)
+      const totalPlaylistWidth = (columnWidth * 2) + columnSpacing;
+      // Use playlistPosition.x, but if it's 50 (default center), calculate actual center
+      const playlistX = playlistPosition.x === 50
+        ? (canvas.width - totalPlaylistWidth) / 2
+        : (canvas.width * playlistPosition.x) / 100 - (totalPlaylistWidth / 2);
+      const playlistY = (canvas.height * playlistPosition.y) / 100;
+
+      // Calculate start times for songs
+      const songStartTimes = calculateSongStartTimes();
+      const startTimesMap = new Map(songStartTimes.map(st => [st.songId, st.formattedTime]));
+
+      // Draw selection indicator if playlist is selected (with full opacity for visibility)
+      if (selectedComponent === 'playlist') {
+        const adjustedItemHeight = playlistFontSize * 1.5;
+        const adjustedSpacing = playlistFontSize * 0.5;
+        const playlistHeight = songsPerColumn * (adjustedItemHeight + adjustedSpacing);
+        const playlistWidth = columnWidth * 2 + columnSpacing;
+        ctx.globalAlpha = 1.0; // Full opacity for selection indicator
+        ctx.strokeStyle = '#3b82f6';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([5, 5]);
+        ctx.strokeRect(
+          playlistX - 5,
+          playlistY - 5,
+          playlistWidth + 10,
+          playlistHeight + 10
+        );
+        ctx.setLineDash([]);
+        ctx.globalAlpha = playlistOpacity; // Restore playlist opacity
+      }
+
+      ctx.font = `${playlistFontSize}px Arial`;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+
+      // Get current playing song
+      const currentSong = getCurrentSong();
+
+      // Adjust item height based on font size
+      const adjustedItemHeight = playlistFontSize * 1.5;
+      const adjustedSpacing = playlistFontSize * 0.5;
+
+      // Draw border around entire playlist if enabled
+      if (showPlaylistBorder) {
+        const adjustedItemHeight = playlistFontSize * 1.5;
+        const adjustedSpacing = playlistFontSize * 0.5;
+        const playlistHeight = songsPerColumn * (adjustedItemHeight + adjustedSpacing);
+        const playlistWidth = columnWidth * 2 + columnSpacing;
+
+        ctx.strokeStyle = playlistBorderColor;
+        ctx.lineWidth = playlistBorderWidth;
+        ctx.beginPath();
+        if (playlistBorderRadius > 0) {
+          // Rounded rectangle
+          const radius = playlistBorderRadius;
+          ctx.moveTo(playlistX + radius, playlistY);
+          ctx.lineTo(playlistX + playlistWidth - radius, playlistY);
+          ctx.quadraticCurveTo(playlistX + playlistWidth, playlistY, playlistX + playlistWidth, playlistY + radius);
+          ctx.lineTo(playlistX + playlistWidth, playlistY + playlistHeight - radius);
+          ctx.quadraticCurveTo(playlistX + playlistWidth, playlistY + playlistHeight, playlistX + playlistWidth - radius, playlistY + playlistHeight);
+          ctx.lineTo(playlistX + radius, playlistY + playlistHeight);
+          ctx.quadraticCurveTo(playlistX, playlistY + playlistHeight, playlistX, playlistY + playlistHeight - radius);
+          ctx.lineTo(playlistX, playlistY + radius);
+          ctx.quadraticCurveTo(playlistX, playlistY, playlistX + radius, playlistY);
+        } else {
+          // Regular rectangle
+          ctx.rect(playlistX, playlistY, playlistWidth, playlistHeight);
+        }
+        ctx.stroke();
+      }
+
+      itemsToShow.forEach((song, index) => {
+        // Determine which column (0 = left, 1 = right)
+        const column = Math.floor(index / songsPerColumn);
+        const rowInColumn = index % songsPerColumn;
+
+        const x = playlistX + (column * (columnWidth + columnSpacing));
+        const y = playlistY + (rowInColumn * (adjustedItemHeight + adjustedSpacing));
+
+        const startTime = startTimesMap.get(song.id) || '0:00';
+        const isCurrentSong = currentSong && song.id === currentSong.songId;
+
+        // Draw highlight background for current song
+        if (isCurrentSong) {
+          ctx.fillStyle = 'rgba(59, 130, 246, 0.3)'; // Blue highlight background
+          ctx.fillRect(
+            x - 10,
+            y - 5,
+            columnWidth + 20,
+            adjustedItemHeight + 10
+          );
+        }
+
+        // Draw song text with different color for current song
+        ctx.fillStyle = isCurrentSong ? '#3b82f6' : playlistTextColor; // Blue for current, custom color for others
+        const songText = `${index + 1}. ${song.title}${song.artist ? ` - ${song.artist}` : ''}`;
+        const timestampText = `[${startTime}]`;
+
+        // Measure text to position timestamp
+        const songTextWidth = ctx.measureText(songText).width;
+        const maxWidth = columnWidth - 100; // Leave space for timestamp
+
+        // Draw song title
+        ctx.fillText(
+          songText,
+          x,
+          y,
+          maxWidth
+        );
+
+        // Draw timestamp next to song name (slightly smaller font)
+        const timestampFontSize = Math.max(20, playlistFontSize * 0.75);
+        ctx.font = `${timestampFontSize}px Arial`;
+        ctx.fillStyle = isCurrentSong ? '#3b82f6' : playlistTextColor;
+        ctx.globalAlpha = playlistOpacity * 0.8; // Slightly transparent for timestamp, but respect playlist opacity
+        ctx.fillText(
+          timestampText,
+          x + Math.min(songTextWidth, maxWidth) + 10,
+          y + 4, // Slight vertical offset
+          columnWidth * 0.3
+        );
+        ctx.globalAlpha = playlistOpacity; // Reset to playlist opacity
+
+        // Reset font for next iteration
+        ctx.font = `${playlistFontSize}px Arial`;
       });
-    }
 
-    ctx.restore();
-  });
-
-  // Draw playlist items (always show when playlist has songs, unless hidden for clean export)
-  if (playlist.length > 0 && !hidePlaylist) {
-    ctx.save();
-    ctx.globalAlpha = playlistOpacity;
-
-    const maxItems = 10;
-    const itemsToShow = playlist.slice(0, maxItems);
-    const columnWidth = canvas.width * 0.35; // Width for each column
-    const columnSpacing = canvas.width * 0.1; // Space between columns
-    const songsPerColumn = 5;
-
-    // Calculate playlist position (centered by default, but movable)
-    const totalPlaylistWidth = (columnWidth * 2) + columnSpacing;
-    // Use playlistPosition.x, but if it's 50 (default center), calculate actual center
-    const playlistX = playlistPosition.x === 50
-      ? (canvas.width - totalPlaylistWidth) / 2
-      : (canvas.width * playlistPosition.x) / 100 - (totalPlaylistWidth / 2);
-    const playlistY = (canvas.height * playlistPosition.y) / 100;
-
-    // Calculate start times for songs
-    const songStartTimes = calculateSongStartTimes();
-    const startTimesMap = new Map(songStartTimes.map(st => [st.songId, st.formattedTime]));
-
-    // Draw selection indicator if playlist is selected (with full opacity for visibility)
-    if (selectedComponent === 'playlist') {
-      const adjustedItemHeight = playlistFontSize * 1.5;
-      const adjustedSpacing = playlistFontSize * 0.5;
-      const playlistHeight = songsPerColumn * (adjustedItemHeight + adjustedSpacing);
-      const playlistWidth = columnWidth * 2 + columnSpacing;
-      ctx.globalAlpha = 1.0; // Full opacity for selection indicator
-      ctx.strokeStyle = '#3b82f6';
-      ctx.lineWidth = 2;
-      ctx.setLineDash([5, 5]);
-      ctx.strokeRect(
-        playlistX - 5,
-        playlistY - 5,
-        playlistWidth + 10,
-        playlistHeight + 10
-      );
-      ctx.setLineDash([]);
-      ctx.globalAlpha = playlistOpacity; // Restore playlist opacity
-    }
-
-    ctx.font = `${playlistFontSize}px Arial`;
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'top';
-
-    // Get current playing song
-    const currentSong = getCurrentSong();
-
-    // Adjust item height based on font size
-    const adjustedItemHeight = playlistFontSize * 1.5;
-    const adjustedSpacing = playlistFontSize * 0.5;
-
-    // Draw border around entire playlist if enabled
-    if (showPlaylistBorder) {
-      const adjustedItemHeight = playlistFontSize * 1.5;
-      const adjustedSpacing = playlistFontSize * 0.5;
-      const playlistHeight = songsPerColumn * (adjustedItemHeight + adjustedSpacing);
-      const playlistWidth = columnWidth * 2 + columnSpacing;
-
-      ctx.strokeStyle = playlistBorderColor;
-      ctx.lineWidth = playlistBorderWidth;
-      ctx.beginPath();
-      if (playlistBorderRadius > 0) {
-        // Rounded rectangle
-        const radius = playlistBorderRadius;
-        ctx.moveTo(playlistX + radius, playlistY);
-        ctx.lineTo(playlistX + playlistWidth - radius, playlistY);
-        ctx.quadraticCurveTo(playlistX + playlistWidth, playlistY, playlistX + playlistWidth, playlistY + radius);
-        ctx.lineTo(playlistX + playlistWidth, playlistY + playlistHeight - radius);
-        ctx.quadraticCurveTo(playlistX + playlistWidth, playlistY + playlistHeight, playlistX + playlistWidth - radius, playlistY + playlistHeight);
-        ctx.lineTo(playlistX + radius, playlistY + playlistHeight);
-        ctx.quadraticCurveTo(playlistX, playlistY + playlistHeight, playlistX, playlistY + playlistHeight - radius);
-        ctx.lineTo(playlistX, playlistY + radius);
-        ctx.quadraticCurveTo(playlistX, playlistY, playlistX + radius, playlistY);
-      } else {
-        // Regular rectangle
-        ctx.rect(playlistX, playlistY, playlistWidth, playlistHeight);
-      }
-      ctx.stroke();
-    }
-
-    itemsToShow.forEach((song, index) => {
-      // Determine which column (0 = left, 1 = right)
-      const column = Math.floor(index / songsPerColumn);
-      const rowInColumn = index % songsPerColumn;
-
-      const x = playlistX + (column * (columnWidth + columnSpacing));
-      const y = playlistY + (rowInColumn * (adjustedItemHeight + adjustedSpacing));
-
-      const startTime = startTimesMap.get(song.id) || '0:00';
-      const isCurrentSong = currentSong && song.id === currentSong.songId;
-
-      // Draw highlight background for current song
-      if (isCurrentSong) {
-        ctx.fillStyle = 'rgba(59, 130, 246, 0.3)'; // Blue highlight background
-        ctx.fillRect(
-          x - 10,
-          y - 5,
-          columnWidth + 20,
-          adjustedItemHeight + 10
+      if (playlist.length > maxItems) {
+        ctx.fillStyle = playlistTextColor;
+        const adjustedItemHeight = playlistFontSize * 1.5;
+        const adjustedSpacing = playlistFontSize * 0.5;
+        const moreSongsFontSize = Math.max(24, playlistFontSize * 0.85);
+        ctx.font = `${moreSongsFontSize}px Arial`;
+        ctx.textAlign = 'center';
+        const lastRowY = playlistY + (songsPerColumn * (adjustedItemHeight + adjustedSpacing));
+        ctx.fillText(
+          `+ ${playlist.length - maxItems} more songs...`,
+          canvas.width / 2,
+          lastRowY
         );
       }
 
-      // Draw song text with different color for current song
-      ctx.fillStyle = isCurrentSong ? '#3b82f6' : playlistTextColor; // Blue for current, custom color for others
-      const songText = `${index + 1}. ${song.title}${song.artist ? ` - ${song.artist}` : ''}`;
-      const timestampText = `[${startTime}]`;
-
-      // Measure text to position timestamp
-      const songTextWidth = ctx.measureText(songText).width;
-      const maxWidth = columnWidth - 100; // Leave space for timestamp
-
-      // Draw song title
-      ctx.fillText(
-        songText,
-        x,
-        y,
-        maxWidth
-      );
-
-      // Draw timestamp next to song name (slightly smaller font)
-      const timestampFontSize = Math.max(20, playlistFontSize * 0.75);
-      ctx.font = `${timestampFontSize}px Arial`;
-      ctx.fillStyle = isCurrentSong ? '#3b82f6' : playlistTextColor;
-      ctx.globalAlpha = playlistOpacity * 0.8; // Slightly transparent for timestamp, but respect playlist opacity
-      ctx.fillText(
-        timestampText,
-        x + Math.min(songTextWidth, maxWidth) + 10,
-        y + 4, // Slight vertical offset
-        columnWidth * 0.3
-      );
-      ctx.globalAlpha = playlistOpacity; // Reset to playlist opacity
-
-      // Reset font for next iteration
-      ctx.font = `${playlistFontSize}px Arial`;
-    });
-
-    if (playlist.length > maxItems) {
-      ctx.fillStyle = playlistTextColor;
-      const adjustedItemHeight = playlistFontSize * 1.5;
-      const adjustedSpacing = playlistFontSize * 0.5;
-      const moreSongsFontSize = Math.max(24, playlistFontSize * 0.85);
-      ctx.font = `${moreSongsFontSize}px Arial`;
-      ctx.textAlign = 'center';
-      const lastRowY = playlistY + (songsPerColumn * (adjustedItemHeight + adjustedSpacing));
-      ctx.fillText(
-        `+ ${playlist.length - maxItems} more songs...`,
-        canvas.width / 2,
-        lastRowY
-      );
+      ctx.restore();
     }
 
-    ctx.restore();
-  }
+    return canvas.toDataURL('image/png');
+  };
 
-  return canvas.toDataURL('image/png');
-};
+  // Effect to re-render when dependencies change
+  useEffect(() => {
+    if (isDragging || isResizing || isDraggingTitle || isDraggingPlaylist) return;
 
-// Effect to re-render when dependencies change
-useEffect(() => {
-  if (isDragging || isResizing || isDraggingTitle || isDraggingPlaylist) return;
+    // Generate clean background (no playlist)
+    const cleanUrl = renderThumbnail(true);
 
-  // Generate clean background (no playlist)
-  const cleanUrl = renderThumbnail(true);
+    // Generate full thumbnail (with playlist)
+    const fullUrl = renderThumbnail(false);
 
-  // Generate full thumbnail (with playlist)
-  const fullUrl = renderThumbnail(false);
+    if (fullUrl && cleanUrl) {
+      setThumbnailUrl(fullUrl);
 
-  if (fullUrl && cleanUrl) {
-    setThumbnailUrl(fullUrl);
-
-    // Pass both URLs to parent
-    onThumbnailChange?.({
-      thumbnailUrl: fullUrl,
-      cleanBackgroundUrl: cleanUrl, // Pass clean background (no text)
-      playlistPosition
-    });
-
-    // Save thumbnail settings to context/window for review step
-    if (typeof window !== 'undefined' && (window as any).saveThumbnailData) {
-      (window as any).saveThumbnailData({
+      // Pass both URLs to parent
+      onThumbnailChange?.({
         thumbnailUrl: fullUrl,
-        cleanBackgroundUrl: cleanUrl, // Save clean background
-        title,
-        titlePosition,
-        titleFontSize,
-        titleFontFamily,
-        playlistPosition,
-        showTitle,
-        backgroundColor,
+        cleanBackgroundUrl: cleanUrl, // Pass clean background (no text)
+        playlistPosition
       });
+
+      // Save thumbnail settings to context/window for review step
+      if (typeof window !== 'undefined' && (window as any).saveThumbnailData) {
+        (window as any).saveThumbnailData({
+          thumbnailUrl: fullUrl,
+          cleanBackgroundUrl: cleanUrl, // Save clean background
+          title,
+          titlePosition,
+          titleFontSize,
+          titleFontFamily,
+          playlistPosition,
+          showTitle,
+          backgroundColor,
+        });
+      }
     }
-  }
-}, [
-  backgroundColor, elements, title, showTitle, titlePosition, titleFontSize, titleFontFamily,
-  textColor, titleOpacity, titleBorderColor, titleBorderWidth, titleBorderRadius, showTitleBorder,
-  playlist, playlistPosition, playlistFontSize, playlistTextColor,
-  playlistOpacity, playlistBorderColor, playlistBorderWidth, playlistBorderRadius, showPlaylistBorder,
-  selectedComponent, selectedElementId
-]);
+  }, [
+    backgroundColor, elements, title, showTitle, titlePosition, titleFontSize, titleFontFamily,
+    textColor, titleOpacity, titleBorderColor, titleBorderWidth, titleBorderRadius, showTitleBorder,
+    playlist, playlistPosition, playlistFontSize, playlistTextColor,
+    playlistOpacity, playlistBorderColor, playlistBorderWidth, playlistBorderRadius, showPlaylistBorder,
+    selectedComponent, selectedElementId
+  ]);
 
-const downloadThumbnail = () => {
-  if (!thumbnailUrl) return;
+  const downloadThumbnail = () => {
+    if (!thumbnailUrl) return;
 
-  const link = document.createElement('a');
-  link.download = 'playlist-thumbnail.png';
-  link.href = thumbnailUrl;
-  link.click();
-  showNotification('Thumbnail downloaded!', 'success');
-};
+    const link = document.createElement('a');
+    link.download = 'playlist-thumbnail.png';
+    link.href = thumbnailUrl;
+    link.click();
+    showNotification('Thumbnail downloaded!', 'success');
+  };
 
-const handlePlayPause = () => {
-  const audio = audioRef.current;
-  if (!audio || !stitchedAudioUrl) {
-    showNotification('Please stitch your playlist first to preview audio', 'warning');
-    return;
-  }
+  const handleStopRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
+    }
+    if (audioRef.current) {
+      audioRef.current.pause();
+    }
+    setIsRecording(false);
+    setIsPlaying(false);
+  };
 
-  if (isPlaying) {
-    audio.pause();
-  } else {
-    audio.play();
-  }
-};
+  const handleStartRecording = () => {
+    if (!canvasRef.current || !audioRef.current || !stitchedAudioUrl) {
+      showNotification('Missing resources for recording', 'error');
+      return;
+    }
 
-const handleSeek = (time: number) => {
-  const audio = audioRef.current;
-  if (!audio) return;
+    try {
+      setIsRecording(true);
 
-  audio.currentTime = time;
-  setCurrentPlaybackTime(time);
-};
+      // Reset audio to start
+      audioRef.current.currentTime = 0;
+      setCurrentPlaybackTime(0);
 
-const songStartTimes = calculateSongStartTimes();
-// Use actual audio duration if available, otherwise use calculated duration
-const totalDuration = actualAudioDuration > 0
-  ? actualAudioDuration
-  : (songStartTimes.length > 0
-    ? songStartTimes[songStartTimes.length - 1].endTime
-    : 0);
+      // Setup Audio Context if not exists
+      if (!audioContextRef.current) {
+        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      }
 
-return (
-  <div className="space-y-6">
-    {/* Preview Canvas */}
-    <div className="bg-white rounded-lg border border-gray-200 p-6">
-      <div className="flex justify-between items-center mb-4">
-        <h3 className="text-lg font-semibold text-gray-900">Video Thumbnail Preview</h3>
-        <Button variant="secondary" onClick={downloadThumbnail} disabled={!thumbnailUrl}>
-          📥 Download Thumbnail
-        </Button>
+      const audioCtx = audioContextRef.current;
+
+      // Create source only once
+      if (!audioSourceRef.current) {
+        audioSourceRef.current = audioCtx.createMediaElementSource(audioRef.current);
+      }
+
+      const dest = audioCtx.createMediaStreamDestination();
+      audioSourceRef.current.connect(dest);
+      audioSourceRef.current.connect(audioCtx.destination); // Connect to speakers
+
+      // Capture Canvas Stream (30 FPS)
+      const canvasStream = canvasRef.current.captureStream(30);
+
+      // Combine tracks
+      const audioTrack = dest.stream.getAudioTracks()[0];
+      if (audioTrack) {
+        canvasStream.addTrack(audioTrack);
+      }
+
+      // Initialize MediaRecorder
+      const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
+        ? 'video/webm;codecs=vp9'
+        : 'video/webm'; // Fallback
+
+      const recorder = new MediaRecorder(canvasStream, {
+        mimeType,
+        videoBitsPerSecond: 5000000 // 5 Mbps
+      });
+
+      const chunks: Blob[] = [];
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunks.push(e.data);
+      };
+
+      recorder.onstop = () => {
+        const blob = new Blob(chunks, { type: 'video/webm' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `playlist_simulation_${Date.now()}.webm`;
+        a.click();
+        URL.revokeObjectURL(url);
+        showNotification('Simulation recording downloaded!', 'success');
+        setIsRecording(false);
+      };
+
+      mediaRecorderRef.current = recorder;
+      recorder.start();
+
+      audioRef.current.play().then(() => {
+        setIsPlaying(true);
+      }).catch(e => {
+        console.error("Playback failed", e);
+        handleStopRecording();
+      });
+
+      // Stop recording when audio ends
+      audioRef.current.onended = () => {
+        handleStopRecording();
+      };
+
+    } catch (error) {
+      console.error('Recording initialization failed:', error);
+      showNotification('Failed to start recording', 'error');
+      setIsRecording(false);
+    }
+  };
+
+  const handlePlayPause = () => {
+    const audio = audioRef.current;
+    if (!audio || !stitchedAudioUrl) {
+      showNotification('Please stitch your playlist first to preview audio', 'warning');
+      return;
+    }
+
+    if (isPlaying) {
+      audio.pause();
+    } else {
+      audio.play();
+    }
+  };
+
+  const handleSeek = (time: number) => {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    audio.currentTime = time;
+    setCurrentPlaybackTime(time);
+  };
+
+  const songStartTimes = calculateSongStartTimes();
+  // Use actual audio duration if available, otherwise use calculated duration
+  const totalDuration = actualAudioDuration > 0
+    ? actualAudioDuration
+    : (songStartTimes.length > 0
+      ? songStartTimes[songStartTimes.length - 1].endTime
+      : 0);
+
+  return (
+    <div className="space-y-6">
+      {/* Preview Canvas */}
+      <div className="bg-white rounded-lg border border-gray-200 p-6">
+        <div className="flex justify-between items-center mb-4">
+          <h3 className="text-lg font-semibold text-gray-900">Video Thumbnail Preview</h3>
+          <Button variant="secondary" onClick={downloadThumbnail} disabled={!thumbnailUrl}>
+            📥 Download Thumbnail
+          </Button>
+        </div>
+        <div className="bg-gray-100 rounded-lg p-4 flex justify-center">
+          <canvas
+            ref={canvasRef}
+            className="max-w-full h-auto border border-gray-300 rounded"
+            style={{
+              maxHeight: '400px',
+              cursor: canvasCursor
+            }}
+            onMouseDown={handleCanvasMouseDown}
+            onMouseMove={handleCanvasMouseMove}
+            onMouseUp={handleCanvasMouseUp}
+            onMouseLeave={() => {
+              setCanvasCursor('default');
+              handleCanvasMouseUp();
+            }}
+          />
+        </div>
+        {selectedComponent && (
+          <div className="mt-2 text-sm text-gray-600">
+            {selectedComponent === 'title' && '💡 Title selected - Click and drag to move'}
+            {selectedComponent === 'playlist' && '💡 Playlist selected - Click and drag to move'}
+            {selectedComponent === 'element' && '💡 Element selected - Click and drag to move, drag corners to resize'}
+          </div>
+        )}
       </div>
-      <div className="bg-gray-100 rounded-lg p-4 flex justify-center">
-        <canvas
-          ref={canvasRef}
-          className="max-w-full h-auto border border-gray-300 rounded"
-          style={{
-            maxHeight: '400px',
-            cursor: canvasCursor
-          }}
-          onMouseDown={handleCanvasMouseDown}
-          onMouseMove={handleCanvasMouseMove}
-          onMouseUp={handleCanvasMouseUp}
-          onMouseLeave={() => {
-            setCanvasCursor('default');
-            handleCanvasMouseUp();
-          }}
-        />
-      </div>
-      {selectedComponent && (
-        <div className="mt-2 text-sm text-gray-600">
-          {selectedComponent === 'title' && '💡 Title selected - Click and drag to move'}
-          {selectedComponent === 'playlist' && '💡 Playlist selected - Click and drag to move'}
-          {selectedComponent === 'element' && '💡 Element selected - Click and drag to move, drag corners to resize'}
+
+      {/* Compact Audio Player */}
+      {stitchedAudioUrl && (
+        <div className="bg-white rounded-lg border border-gray-200 p-4 w-full">
+          {/* Hidden audio element */}
+          <audio
+            ref={audioRef}
+            src={stitchedAudioUrl}
+            className="hidden"
+          />
+
+          {/* Compact Media Player */}
+          <div className="flex items-center gap-3 w-full min-w-0">
+            {/* Play/Pause Button */}
+            <Button
+              onClick={handlePlayPause}
+              variant={isPlaying ? "secondary" : "primary"}
+              size="sm"
+              className="flex-shrink-0"
+            >
+              {isPlaying ? '⏸️' : '▶️'}
+            </Button>
+
+            <Button
+              onClick={isRecording ? handleStopRecording : handleStartRecording}
+              variant={isRecording ? 'danger' : 'secondary'}
+              size="sm"
+              className={`flex-shrink-0 ${isRecording ? 'animate-pulse bg-red-100 text-red-600 border-red-200' : ''}`}
+              title="Record the exact simulation video"
+            >
+              {isRecording ? '⏹️ Stop Rec' : '🔴 Record Sim'}
+            </Button>
+
+            {/* Time Display */}
+            <span className="text-xs text-gray-600 min-w-[50px] flex-shrink-0">
+              {formatTime(currentPlaybackTime)}
+            </span>
+
+            {/* Timeline - Ensure full width */}
+            <div className="flex-1 relative min-w-0 w-full">
+              <input
+                type="range"
+                min="0"
+                max={totalDuration || 1}
+                step="0.1"
+                value={currentPlaybackTime}
+                onChange={(e) => {
+                  const time = Number(e.target.value);
+                  setCurrentPlaybackTime(time);
+                  handleSeek(time);
+                }}
+                onMouseDown={() => setIsDraggingTimeline(true)}
+                onMouseUp={() => setIsDraggingTimeline(false)}
+                className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+                style={{
+                  background: totalDuration > 0
+                    ? `linear-gradient(to right, #3b82f6 0%, #3b82f6 ${(currentPlaybackTime / totalDuration) * 100}%, #e5e7eb ${(currentPlaybackTime / totalDuration) * 100}%, #e5e7eb 100%)`
+                    : '#e5e7eb'
+                }}
+              />
+            </div>
+
+            {/* Total Duration */}
+            <span className="text-xs text-gray-600 min-w-[50px] text-right flex-shrink-0">
+              {formatTime(totalDuration)}
+            </span>
+          </div>
         </div>
       )}
-    </div>
 
-    {/* Compact Audio Player */}
-    {stitchedAudioUrl && (
-      <div className="bg-white rounded-lg border border-gray-200 p-4 w-full">
-        {/* Hidden audio element */}
-        <audio
-          ref={audioRef}
-          src={stitchedAudioUrl}
-          className="hidden"
-        />
+      {/* Component Properties - Only show selected component */}
+      {selectedComponent === 'title' && (
+        <div className="bg-white rounded-lg border border-blue-500 border-2 p-6">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">Title Properties ✓ Selected</h3>
+          <div className="space-y-4">
+            <div>
+              <label className="flex items-center gap-2 mb-2">
+                <input
+                  type="checkbox"
+                  checked={showTitle}
+                  onChange={(e) => setShowTitle(e.target.checked)}
+                  className="w-4 h-4 text-purple-600 border-gray-300 rounded focus:ring-purple-500"
+                />
+                <span className="text-sm font-medium text-gray-700">Show Title</span>
+              </label>
+              {showTitle && (
+                <>
+                  <div className="mb-3">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Rename Title
+                    </label>
+                    <input
+                      type="text"
+                      value={title}
+                      onChange={(e) => setTitle(e.target.value)}
+                      placeholder="Playlist Title"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    />
+                  </div>
 
-        {/* Compact Media Player */}
-        <div className="flex items-center gap-3 w-full min-w-0">
-          {/* Play/Pause Button */}
-          <Button
-            onClick={handlePlayPause}
-            variant={isPlaying ? "secondary" : "primary"}
-            size="sm"
-            className="flex-shrink-0"
-          >
-            {isPlaying ? '⏸️' : '▶️'}
-          </Button>
+                  {/* Font Family */}
+                  <div className="mb-3">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Font Family
+                    </label>
+                    <select
+                      value={titleFontFamily}
+                      onChange={(e) => setTitleFontFamily(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    >
+                      <option value="Arial">Arial</option>
+                      <option value="Helvetica">Helvetica</option>
+                      <option value="Times New Roman">Times New Roman</option>
+                      <option value="Courier New">Courier New</option>
+                      <option value="Verdana">Verdana</option>
+                      <option value="Georgia">Georgia</option>
+                      <option value="Comic Sans MS">Comic Sans MS</option>
+                      <option value="Impact">Impact</option>
+                    </select>
+                  </div>
 
-          {/* Time Display */}
-          <span className="text-xs text-gray-600 min-w-[50px] flex-shrink-0">
-            {formatTime(currentPlaybackTime)}
-          </span>
+                  {/* Font Size */}
+                  <div className="mb-3">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Font Size: {titleFontSize}px
+                    </label>
+                    <input
+                      type="range"
+                      min="24"
+                      max="120"
+                      value={titleFontSize}
+                      onChange={(e) => setTitleFontSize(Number(e.target.value))}
+                      className="w-full"
+                    />
+                  </div>
 
-          {/* Timeline - Ensure full width */}
-          <div className="flex-1 relative min-w-0 w-full">
-            <input
-              type="range"
-              min="0"
-              max={totalDuration || 1}
-              step="0.1"
-              value={currentPlaybackTime}
-              onChange={(e) => {
-                const time = Number(e.target.value);
-                setCurrentPlaybackTime(time);
-                handleSeek(time);
-              }}
-              onMouseDown={() => setIsDraggingTimeline(true)}
-              onMouseUp={() => setIsDraggingTimeline(false)}
-              className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer"
-              style={{
-                background: totalDuration > 0
-                  ? `linear-gradient(to right, #3b82f6 0%, #3b82f6 ${(currentPlaybackTime / totalDuration) * 100}%, #e5e7eb ${(currentPlaybackTime / totalDuration) * 100}%, #e5e7eb 100%)`
-                  : '#e5e7eb'
-              }}
-            />
+                  {/* Border Options */}
+                  <div className="border-t border-gray-200 pt-4 mb-3">
+                    <label className="flex items-center gap-2 mb-4">
+                      <input
+                        type="checkbox"
+                        checked={showTitleBorder}
+                        onChange={(e) => setShowTitleBorder(e.target.checked)}
+                        className="w-4 h-4 text-purple-600 border-gray-300 rounded focus:ring-purple-500"
+                      />
+                      <span className="text-sm font-medium text-gray-700">Show Border</span>
+                    </label>
+
+                    {showTitleBorder && (
+                      <div className="space-y-3 ml-6">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Border Color
+                          </label>
+                          <div className="flex items-center gap-3">
+                            <input
+                              type="color"
+                              value={titleBorderColor}
+                              onChange={(e) => setTitleBorderColor(e.target.value)}
+                              className="w-16 h-10 rounded border border-gray-300 cursor-pointer"
+                            />
+                            <input
+                              type="text"
+                              value={titleBorderColor}
+                              onChange={(e) => setTitleBorderColor(e.target.value)}
+                              className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                              placeholder="#FFFFFF"
+                            />
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Border Width: {titleBorderWidth}px
+                          </label>
+                          <input
+                            type="range"
+                            min="1"
+                            max="10"
+                            value={titleBorderWidth}
+                            onChange={(e) => setTitleBorderWidth(Number(e.target.value))}
+                            className="w-full"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Corner Radius: {titleBorderRadius}px
+                          </label>
+                          <input
+                            type="range"
+                            min="0"
+                            max="30"
+                            value={titleBorderRadius}
+                            onChange={(e) => setTitleBorderRadius(Number(e.target.value))}
+                            className="w-full"
+                          />
+                          <p className="text-xs text-gray-500 mt-1">Set to 0 for sharp corners</p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Opacity */}
+                  <div className="mb-3">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Opacity: {Math.round(titleOpacity * 100)}%
+                    </label>
+                    <input
+                      type="range"
+                      min="0"
+                      max="1"
+                      step="0.01"
+                      value={titleOpacity}
+                      onChange={(e) => setTitleOpacity(Number(e.target.value))}
+                      className="w-full"
+                    />
+                  </div>
+
+                  {/* Position Info */}
+                  <div className="bg-gray-50 rounded-lg p-3 text-sm text-gray-600">
+                    <p className="mb-1">
+                      <strong>Position:</strong> X: {titlePosition.x.toFixed(1)}%, Y: {titlePosition.y.toFixed(1)}%
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      💡 Click and drag the title on the canvas to reposition it
+                    </p>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Background Settings - Always visible */}
+      {!selectedComponent && (
+        <div className="bg-white rounded-lg border border-gray-200 p-6">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">Background</h3>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Background Color
+              </label>
+              <div className="flex items-center gap-3">
+                <input
+                  type="color"
+                  value={backgroundColor}
+                  onChange={(e) => setBackgroundColor(e.target.value)}
+                  className="w-16 h-10 rounded border border-gray-300 cursor-pointer"
+                />
+                <input
+                  type="text"
+                  value={backgroundColor}
+                  onChange={(e) => setBackgroundColor(e.target.value)}
+                  className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                  placeholder="#000000"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Playlist Settings (when selected) */}
+      {selectedComponent === 'playlist' && (
+        <div className="bg-white rounded-lg border border-blue-500 border-2 p-6">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">Playlist Properties ✓ Selected</h3>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Font Size: {playlistFontSize}px
+              </label>
+              <input
+                type="range"
+                min="20"
+                max="72"
+                value={playlistFontSize}
+                onChange={(e) => setPlaylistFontSize(Number(e.target.value))}
+                className="w-full"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Text Color
+              </label>
+              <div className="flex items-center gap-3">
+                <input
+                  type="color"
+                  value={playlistTextColor}
+                  onChange={(e) => setPlaylistTextColor(e.target.value)}
+                  className="w-16 h-10 rounded border border-gray-300 cursor-pointer"
+                />
+                <input
+                  type="text"
+                  value={playlistTextColor}
+                  onChange={(e) => setPlaylistTextColor(e.target.value)}
+                  className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                  placeholder="#FFFFFF"
+                />
+              </div>
+            </div>
+
+            {/* Border Options */}
+            <div className="border-t border-gray-200 pt-4">
+              <label className="flex items-center gap-2 mb-4">
+                <input
+                  type="checkbox"
+                  checked={showPlaylistBorder}
+                  onChange={(e) => setShowPlaylistBorder(e.target.checked)}
+                  className="w-4 h-4 text-purple-600 border-gray-300 rounded focus:ring-purple-500"
+                />
+                <span className="text-sm font-medium text-gray-700">Show Border</span>
+              </label>
+
+              {showPlaylistBorder && (
+                <div className="space-y-3 ml-6">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Border Color
+                    </label>
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="color"
+                        value={playlistBorderColor}
+                        onChange={(e) => setPlaylistBorderColor(e.target.value)}
+                        className="w-16 h-10 rounded border border-gray-300 cursor-pointer"
+                      />
+                      <input
+                        type="text"
+                        value={playlistBorderColor}
+                        onChange={(e) => setPlaylistBorderColor(e.target.value)}
+                        className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                        placeholder="#FFFFFF"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Border Width: {playlistBorderWidth}px
+                    </label>
+                    <input
+                      type="range"
+                      min="1"
+                      max="10"
+                      value={playlistBorderWidth}
+                      onChange={(e) => setPlaylistBorderWidth(Number(e.target.value))}
+                      className="w-full"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Corner Radius: {playlistBorderRadius}px
+                    </label>
+                    <input
+                      type="range"
+                      min="0"
+                      max="30"
+                      value={playlistBorderRadius}
+                      onChange={(e) => setPlaylistBorderRadius(Number(e.target.value))}
+                      className="w-full"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">Set to 0 for sharp corners</p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Opacity */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Opacity: {Math.round(playlistOpacity * 100)}%
+              </label>
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.01"
+                value={playlistOpacity}
+                onChange={(e) => setPlaylistOpacity(Number(e.target.value))}
+                className="w-full"
+              />
+            </div>
+
+            <div className="bg-gray-50 rounded-lg p-3 text-sm text-gray-600">
+              <p className="mb-1">
+                <strong>Position:</strong> X: {playlistPosition.x.toFixed(1)}%, Y: {playlistPosition.y.toFixed(1)}%
+              </p>
+              <p className="text-xs text-gray-500">
+                💡 Click and drag the playlist on the canvas to reposition it
+              </p>
+            </div>
+            <div className="text-sm text-gray-600">
+              <p><strong>Songs:</strong> {playlist.length}</p>
+              <p><strong>Display:</strong> {Math.min(playlist.length, 10)} of {playlist.length} songs</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Element List Sidebar */}
+      <div className="bg-white rounded-lg border border-gray-200 p-6">
+        <h3 className="text-lg font-semibold text-gray-900 mb-4">Elements</h3>
+        <div className="space-y-2 max-h-96 overflow-y-auto">
+          {/* Background - Always at bottom, not movable */}
+          <div className="p-2 bg-gray-100 rounded border border-gray-300 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="text-lg">🎨</span>
+              <span className="text-sm font-medium text-gray-700">Background</span>
+            </div>
+            <span className="text-xs text-gray-500">(Fixed)</span>
           </div>
 
-          {/* Total Duration */}
-          <span className="text-xs text-gray-600 min-w-[50px] text-right flex-shrink-0">
-            {formatTime(totalDuration)}
-          </span>
+          {/* Title Element */}
+          {showTitle && (
+            <div
+              className={`p-2 rounded border-2 flex items-center justify-between cursor-pointer transition-colors ${selectedComponent === 'title'
+                ? 'bg-blue-100 border-blue-500'
+                : 'bg-white border-gray-300 hover:bg-gray-50'
+                }`}
+              onClick={() => {
+                setSelectedComponent('title');
+                setSelectedElementId(null);
+              }}
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-lg">📝</span>
+                <span className="text-sm font-medium text-gray-700">Title: "{title}"</span>
+              </div>
+              <div className="flex gap-1">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    // Move title to front by moving all custom elements before it
+                    // Since title renders before elements, we can't move it forward
+                    // But we can ensure it's at least above background
+                    showNotification('Title is already at the front of its layer', 'info');
+                  }}
+                  title="Bring to Front"
+                  disabled={true}
+                >
+                  ⬆️
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    // Title can't go behind background, but we can move it behind playlist
+                    // by adjusting rendering order (this would require refactoring rendering)
+                    showNotification('Title moved behind playlist', 'success');
+                  }}
+                  title="Send to Back"
+                >
+                  ⬇️
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* Playlist Element */}
+          {playlist.length > 0 && (
+            <div
+              className={`p-2 rounded border-2 flex items-center justify-between cursor-pointer transition-colors ${selectedComponent === 'playlist'
+                ? 'bg-blue-100 border-blue-500'
+                : 'bg-white border-gray-300 hover:bg-gray-50'
+                }`}
+              onClick={() => {
+                setSelectedComponent('playlist');
+                setSelectedElementId(null);
+              }}
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-lg">🎵</span>
+                <span className="text-sm font-medium text-gray-700">Playlist ({playlist.length} songs)</span>
+              </div>
+              <div className="flex gap-1">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    // Playlist can move in front of title by adjusting rendering
+                    showNotification('Playlist moved to front', 'success');
+                  }}
+                  title="Bring to Front"
+                >
+                  ⬆️
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    // Playlist can move behind title
+                    showNotification('Playlist moved behind title', 'success');
+                  }}
+                  title="Send to Back"
+                >
+                  ⬇️
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* Custom Elements */}
+          {elements.map((element, index) => (
+            <div
+              key={element.id}
+              className={`p-2 rounded border-2 flex items-center justify-between cursor-pointer transition-colors ${selectedComponent === 'element' && selectedElementId === element.id
+                ? 'bg-blue-100 border-blue-500'
+                : 'bg-white border-gray-300 hover:bg-gray-50'
+                }`}
+              onClick={() => {
+                setSelectedComponent('element');
+                setSelectedElementId(element.id);
+              }}
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-lg">
+                  {element.type === 'text' ? '📝' : element.type === 'image' ? '🖼️' : '🔷'}
+                </span>
+                <span className="text-sm font-medium text-gray-700">
+                  {element.type === 'text'
+                    ? `Text: "${element.text?.substring(0, 20)}${element.text && element.text.length > 20 ? '...' : ''}"`
+                    : element.type === 'image'
+                      ? 'Image'
+                      : element.type}
+                </span>
+              </div>
+              <div className="flex gap-1">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const elementIndex = elements.findIndex(el => el.id === element.id);
+                    if (elementIndex !== -1 && elementIndex < elements.length - 1) {
+                      const newElements = [...elements];
+                      const [movedElement] = newElements.splice(elementIndex, 1);
+                      newElements.push(movedElement);
+                      setElements(newElements);
+                      showNotification('Element moved to front', 'success');
+                    }
+                  }}
+                  disabled={index === elements.length - 1}
+                  title="Bring to Front"
+                >
+                  ⬆️
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const elementIndex = elements.findIndex(el => el.id === element.id);
+                    if (elementIndex !== -1 && elementIndex > 0) {
+                      const newElements = [...elements];
+                      const [movedElement] = newElements.splice(elementIndex, 1);
+                      newElements.unshift(movedElement);
+                      setElements(newElements);
+                      showNotification('Element moved to back', 'success');
+                    }
+                  }}
+                  disabled={index === 0}
+                  title="Send to Back"
+                >
+                  ⬇️
+                </Button>
+              </div>
+            </div>
+          ))}
+
+          {elements.length === 0 && !showTitle && playlist.length === 0 && (
+            <div className="text-sm text-gray-500 text-center py-4">
+              No elements added yet
+            </div>
+          )}
         </div>
       </div>
-    )}
 
-    {/* Component Properties - Only show selected component */}
-    {selectedComponent === 'title' && (
-      <div className="bg-white rounded-lg border border-blue-500 border-2 p-6">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">Title Properties ✓ Selected</h3>
-        <div className="space-y-4">
-          <div>
-            <label className="flex items-center gap-2 mb-2">
-              <input
-                type="checkbox"
-                checked={showTitle}
-                onChange={(e) => setShowTitle(e.target.checked)}
-                className="w-4 h-4 text-purple-600 border-gray-300 rounded focus:ring-purple-500"
-              />
-              <span className="text-sm font-medium text-gray-700">Show Title</span>
-            </label>
-            {showTitle && (
-              <>
-                <div className="mb-3">
+      {/* Selected Element Properties */}
+      {selectedComponent === 'element' && selectedElementId && (() => {
+        const selectedElement = elements.find(el => el.id === selectedElementId);
+        if (selectedElement?.type === 'text') {
+          return (
+            <div className="bg-white rounded-lg border border-blue-500 border-2 p-6">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">Text Element Properties ✓ Selected</h3>
+              <div className="space-y-4">
+                <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Rename Title
+                    Text Content
                   </label>
                   <input
                     type="text"
-                    value={title}
-                    onChange={(e) => setTitle(e.target.value)}
-                    placeholder="Playlist Title"
+                    value={selectedElement.text || ''}
+                    onChange={(e) => {
+                      setElements(elements.map(el =>
+                        el.id === selectedElementId
+                          ? { ...el, text: e.target.value, width: e.target.value.length * (selectedElement.fontSize || fontSize) * 0.6 }
+                          : el
+                      ));
+                    }}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    placeholder="Enter text"
                   />
                 </div>
 
-                {/* Font Family */}
-                <div className="mb-3">
+                <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Font Family
                   </label>
                   <select
-                    value={titleFontFamily}
-                    onChange={(e) => setTitleFontFamily(e.target.value)}
+                    value={selectedElement.fontFamily || 'Arial'}
+                    onChange={(e) => {
+                      setElements(elements.map(el =>
+                        el.id === selectedElementId
+                          ? { ...el, fontFamily: e.target.value }
+                          : el
+                      ));
+                    }}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
                   >
                     <option value="Arial">Arial</option>
@@ -1215,221 +1845,42 @@ return (
                     <option value="Georgia">Georgia</option>
                     <option value="Comic Sans MS">Comic Sans MS</option>
                     <option value="Impact">Impact</option>
+                    <option value="Trebuchet MS">Trebuchet MS</option>
+                    <option value="Palatino">Palatino</option>
+                    <option value="Garamond">Garamond</option>
+                    <option value="Bookman">Bookman</option>
+                    <option value="Tahoma">Tahoma</option>
+                    <option value="Lucida Console">Lucida Console</option>
                   </select>
                 </div>
 
-                {/* Font Size */}
-                <div className="mb-3">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Font Size: {titleFontSize}px
-                  </label>
-                  <input
-                    type="range"
-                    min="24"
-                    max="120"
-                    value={titleFontSize}
-                    onChange={(e) => setTitleFontSize(Number(e.target.value))}
-                    className="w-full"
-                  />
-                </div>
-
-                {/* Border Options */}
-                <div className="border-t border-gray-200 pt-4 mb-3">
-                  <label className="flex items-center gap-2 mb-4">
-                    <input
-                      type="checkbox"
-                      checked={showTitleBorder}
-                      onChange={(e) => setShowTitleBorder(e.target.checked)}
-                      className="w-4 h-4 text-purple-600 border-gray-300 rounded focus:ring-purple-500"
-                    />
-                    <span className="text-sm font-medium text-gray-700">Show Border</span>
-                  </label>
-
-                  {showTitleBorder && (
-                    <div className="space-y-3 ml-6">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Border Color
-                        </label>
-                        <div className="flex items-center gap-3">
-                          <input
-                            type="color"
-                            value={titleBorderColor}
-                            onChange={(e) => setTitleBorderColor(e.target.value)}
-                            className="w-16 h-10 rounded border border-gray-300 cursor-pointer"
-                          />
-                          <input
-                            type="text"
-                            value={titleBorderColor}
-                            onChange={(e) => setTitleBorderColor(e.target.value)}
-                            className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                            placeholder="#FFFFFF"
-                          />
-                        </div>
-                      </div>
-
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Border Width: {titleBorderWidth}px
-                        </label>
-                        <input
-                          type="range"
-                          min="1"
-                          max="10"
-                          value={titleBorderWidth}
-                          onChange={(e) => setTitleBorderWidth(Number(e.target.value))}
-                          className="w-full"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Corner Radius: {titleBorderRadius}px
-                        </label>
-                        <input
-                          type="range"
-                          min="0"
-                          max="30"
-                          value={titleBorderRadius}
-                          onChange={(e) => setTitleBorderRadius(Number(e.target.value))}
-                          className="w-full"
-                        />
-                        <p className="text-xs text-gray-500 mt-1">Set to 0 for sharp corners</p>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* Opacity */}
-                <div className="mb-3">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Opacity: {Math.round(titleOpacity * 100)}%
-                  </label>
-                  <input
-                    type="range"
-                    min="0"
-                    max="1"
-                    step="0.01"
-                    value={titleOpacity}
-                    onChange={(e) => setTitleOpacity(Number(e.target.value))}
-                    className="w-full"
-                  />
-                </div>
-
-                {/* Position Info */}
-                <div className="bg-gray-50 rounded-lg p-3 text-sm text-gray-600">
-                  <p className="mb-1">
-                    <strong>Position:</strong> X: {titlePosition.x.toFixed(1)}%, Y: {titlePosition.y.toFixed(1)}%
-                  </p>
-                  <p className="text-xs text-gray-500">
-                    💡 Click and drag the title on the canvas to reposition it
-                  </p>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      </div>
-    )}
-
-    {/* Background Settings - Always visible */}
-    {!selectedComponent && (
-      <div className="bg-white rounded-lg border border-gray-200 p-6">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">Background</h3>
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Background Color
-            </label>
-            <div className="flex items-center gap-3">
-              <input
-                type="color"
-                value={backgroundColor}
-                onChange={(e) => setBackgroundColor(e.target.value)}
-                className="w-16 h-10 rounded border border-gray-300 cursor-pointer"
-              />
-              <input
-                type="text"
-                value={backgroundColor}
-                onChange={(e) => setBackgroundColor(e.target.value)}
-                className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                placeholder="#000000"
-              />
-            </div>
-          </div>
-        </div>
-      </div>
-    )}
-
-    {/* Playlist Settings (when selected) */}
-    {selectedComponent === 'playlist' && (
-      <div className="bg-white rounded-lg border border-blue-500 border-2 p-6">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">Playlist Properties ✓ Selected</h3>
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Font Size: {playlistFontSize}px
-            </label>
-            <input
-              type="range"
-              min="20"
-              max="72"
-              value={playlistFontSize}
-              onChange={(e) => setPlaylistFontSize(Number(e.target.value))}
-              className="w-full"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Text Color
-            </label>
-            <div className="flex items-center gap-3">
-              <input
-                type="color"
-                value={playlistTextColor}
-                onChange={(e) => setPlaylistTextColor(e.target.value)}
-                className="w-16 h-10 rounded border border-gray-300 cursor-pointer"
-              />
-              <input
-                type="text"
-                value={playlistTextColor}
-                onChange={(e) => setPlaylistTextColor(e.target.value)}
-                className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                placeholder="#FFFFFF"
-              />
-            </div>
-          </div>
-
-          {/* Border Options */}
-          <div className="border-t border-gray-200 pt-4">
-            <label className="flex items-center gap-2 mb-4">
-              <input
-                type="checkbox"
-                checked={showPlaylistBorder}
-                onChange={(e) => setShowPlaylistBorder(e.target.checked)}
-                className="w-4 h-4 text-purple-600 border-gray-300 rounded focus:ring-purple-500"
-              />
-              <span className="text-sm font-medium text-gray-700">Show Border</span>
-            </label>
-
-            {showPlaylistBorder && (
-              <div className="space-y-3 ml-6">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Border Color
+                    Text Color
                   </label>
                   <div className="flex items-center gap-3">
                     <input
                       type="color"
-                      value={playlistBorderColor}
-                      onChange={(e) => setPlaylistBorderColor(e.target.value)}
+                      value={selectedElement.color || textColor}
+                      onChange={(e) => {
+                        setElements(elements.map(el =>
+                          el.id === selectedElementId
+                            ? { ...el, color: e.target.value }
+                            : el
+                        ));
+                      }}
                       className="w-16 h-10 rounded border border-gray-300 cursor-pointer"
                     />
                     <input
                       type="text"
-                      value={playlistBorderColor}
-                      onChange={(e) => setPlaylistBorderColor(e.target.value)}
+                      value={selectedElement.color || textColor}
+                      onChange={(e) => {
+                        setElements(elements.map(el =>
+                          el.id === selectedElementId
+                            ? { ...el, color: e.target.value }
+                            : el
+                        ));
+                      }}
                       className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
                       placeholder="#FFFFFF"
                     />
@@ -1438,510 +1889,171 @@ return (
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Border Width: {playlistBorderWidth}px
+                    Font Size: {selectedElement.fontSize || fontSize}px
                   </label>
                   <input
                     type="range"
-                    min="1"
-                    max="10"
-                    value={playlistBorderWidth}
-                    onChange={(e) => setPlaylistBorderWidth(Number(e.target.value))}
+                    min="24"
+                    max="120"
+                    value={selectedElement.fontSize || fontSize}
+                    onChange={(e) => {
+                      const newSize = Number(e.target.value);
+                      setElements(elements.map(el =>
+                        el.id === selectedElementId
+                          ? { ...el, fontSize: newSize, width: (el.text || '').length * newSize * 0.6, height: newSize }
+                          : el
+                      ));
+                    }}
                     className="w-full"
                   />
                 </div>
 
+                {/* Layer Management */}
+                <div className="border-t border-gray-200 pt-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Layer Order
+                  </label>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => {
+                        // Bring to front (move to end of array)
+                        const elementIndex = elements.findIndex(el => el.id === selectedElementId);
+                        if (elementIndex !== -1 && elementIndex < elements.length - 1) {
+                          const newElements = [...elements];
+                          const [movedElement] = newElements.splice(elementIndex, 1);
+                          newElements.push(movedElement);
+                          setElements(newElements);
+                          showNotification('Element moved to top', 'success');
+                        }
+                      }}
+                      disabled={elements.findIndex(el => el.id === selectedElementId) === elements.length - 1}
+                    >
+                      ⬆️ Bring to Front
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => {
+                        // Send to back (move to beginning of array)
+                        const elementIndex = elements.findIndex(el => el.id === selectedElementId);
+                        if (elementIndex !== -1 && elementIndex > 0) {
+                          const newElements = [...elements];
+                          const [movedElement] = newElements.splice(elementIndex, 1);
+                          newElements.unshift(movedElement);
+                          setElements(newElements);
+                          showNotification('Element moved to back', 'success');
+                        }
+                      }}
+                      disabled={elements.findIndex(el => el.id === selectedElementId) === 0}
+                    >
+                      ⬇️ Send to Back
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        } else if (selectedElement?.type === 'image') {
+          return (
+            <div className="bg-white rounded-lg border border-blue-500 border-2 p-6">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">Image Element Properties ✓ Selected</h3>
+              <div className="space-y-4">
+                <div className="bg-gray-50 rounded-lg p-3 text-sm text-gray-600">
+                  <p className="mb-1">
+                    <strong>Position:</strong> X: {selectedElement.x.toFixed(0)}, Y: {selectedElement.y.toFixed(0)}
+                  </p>
+                  <p className="mb-1">
+                    <strong>Size:</strong> {selectedElement.width?.toFixed(0)} × {selectedElement.height?.toFixed(0)} px
+                  </p>
+                  <p className="text-xs text-gray-500">
+                    💡 Click and drag to move, drag corners to resize
+                  </p>
+                </div>
+
+                {/* Opacity */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Corner Radius: {playlistBorderRadius}px
+                    Opacity: {Math.round((selectedElement.opacity !== undefined ? selectedElement.opacity : 1) * 100)}%
                   </label>
                   <input
                     type="range"
                     min="0"
-                    max="30"
-                    value={playlistBorderRadius}
-                    onChange={(e) => setPlaylistBorderRadius(Number(e.target.value))}
+                    max="1"
+                    step="0.01"
+                    value={selectedElement.opacity !== undefined ? selectedElement.opacity : 1}
+                    onChange={(e) => {
+                      setElements(elements.map(el =>
+                        el.id === selectedElementId
+                          ? { ...el, opacity: Number(e.target.value) }
+                          : el
+                      ));
+                    }}
                     className="w-full"
                   />
-                  <p className="text-xs text-gray-500 mt-1">Set to 0 for sharp corners</p>
+                </div>
+
+                {/* Layer Management */}
+                <div className="border-t border-gray-200 pt-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Layer Order
+                  </label>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => {
+                        // Bring to front (move to end of array)
+                        const elementIndex = elements.findIndex(el => el.id === selectedElementId);
+                        if (elementIndex !== -1 && elementIndex < elements.length - 1) {
+                          const newElements = [...elements];
+                          const [movedElement] = newElements.splice(elementIndex, 1);
+                          newElements.push(movedElement);
+                          setElements(newElements);
+                          showNotification('Element moved to top', 'success');
+                        }
+                      }}
+                      disabled={elements.findIndex(el => el.id === selectedElementId) === elements.length - 1}
+                    >
+                      ⬆️ Bring to Front
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => {
+                        // Send to back (move to beginning of array)
+                        const elementIndex = elements.findIndex(el => el.id === selectedElementId);
+                        if (elementIndex !== -1 && elementIndex > 0) {
+                          const newElements = [...elements];
+                          const [movedElement] = newElements.splice(elementIndex, 1);
+                          newElements.unshift(movedElement);
+                          setElements(newElements);
+                          showNotification('Element moved to back', 'success');
+                        }
+                      }}
+                      disabled={elements.findIndex(el => el.id === selectedElementId) === 0}
+                    >
+                      ⬇️ Send to Back
+                    </Button>
+                  </div>
                 </div>
               </div>
-            )}
-          </div>
-
-          {/* Opacity */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Opacity: {Math.round(playlistOpacity * 100)}%
-            </label>
-            <input
-              type="range"
-              min="0"
-              max="1"
-              step="0.01"
-              value={playlistOpacity}
-              onChange={(e) => setPlaylistOpacity(Number(e.target.value))}
-              className="w-full"
-            />
-          </div>
-
-          <div className="bg-gray-50 rounded-lg p-3 text-sm text-gray-600">
-            <p className="mb-1">
-              <strong>Position:</strong> X: {playlistPosition.x.toFixed(1)}%, Y: {playlistPosition.y.toFixed(1)}%
-            </p>
-            <p className="text-xs text-gray-500">
-              💡 Click and drag the playlist on the canvas to reposition it
-            </p>
-          </div>
-          <div className="text-sm text-gray-600">
-            <p><strong>Songs:</strong> {playlist.length}</p>
-            <p><strong>Display:</strong> {Math.min(playlist.length, 10)} of {playlist.length} songs</p>
-          </div>
-        </div>
-      </div>
-    )}
-
-    {/* Element List Sidebar */}
-    <div className="bg-white rounded-lg border border-gray-200 p-6">
-      <h3 className="text-lg font-semibold text-gray-900 mb-4">Elements</h3>
-      <div className="space-y-2 max-h-96 overflow-y-auto">
-        {/* Background - Always at bottom, not movable */}
-        <div className="p-2 bg-gray-100 rounded border border-gray-300 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className="text-lg">🎨</span>
-            <span className="text-sm font-medium text-gray-700">Background</span>
-          </div>
-          <span className="text-xs text-gray-500">(Fixed)</span>
-        </div>
-
-        {/* Title Element */}
-        {showTitle && (
-          <div
-            className={`p-2 rounded border-2 flex items-center justify-between cursor-pointer transition-colors ${selectedComponent === 'title'
-              ? 'bg-blue-100 border-blue-500'
-              : 'bg-white border-gray-300 hover:bg-gray-50'
-              }`}
-            onClick={() => {
-              setSelectedComponent('title');
-              setSelectedElementId(null);
-            }}
-          >
-            <div className="flex items-center gap-2">
-              <span className="text-lg">📝</span>
-              <span className="text-sm font-medium text-gray-700">Title: "{title}"</span>
             </div>
-            <div className="flex gap-1">
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  // Move title to front by moving all custom elements before it
-                  // Since title renders before elements, we can't move it forward
-                  // But we can ensure it's at least above background
-                  showNotification('Title is already at the front of its layer', 'info');
-                }}
-                title="Bring to Front"
-                disabled={true}
-              >
-                ⬆️
-              </Button>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  // Title can't go behind background, but we can move it behind playlist
-                  // by adjusting rendering order (this would require refactoring rendering)
-                  showNotification('Title moved behind playlist', 'success');
-                }}
-                title="Send to Back"
-              >
-                ⬇️
-              </Button>
-            </div>
-          </div>
-        )}
+          );
+        }
+        return null;
+      })()}
 
-        {/* Playlist Element */}
-        {playlist.length > 0 && (
-          <div
-            className={`p-2 rounded border-2 flex items-center justify-between cursor-pointer transition-colors ${selectedComponent === 'playlist'
-              ? 'bg-blue-100 border-blue-500'
-              : 'bg-white border-gray-300 hover:bg-gray-50'
-              }`}
-            onClick={() => {
-              setSelectedComponent('playlist');
-              setSelectedElementId(null);
-            }}
-          >
-            <div className="flex items-center gap-2">
-              <span className="text-lg">🎵</span>
-              <span className="text-sm font-medium text-gray-700">Playlist ({playlist.length} songs)</span>
-            </div>
-            <div className="flex gap-1">
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  // Playlist can move in front of title by adjusting rendering
-                  showNotification('Playlist moved to front', 'success');
-                }}
-                title="Bring to Front"
-              >
-                ⬆️
-              </Button>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  // Playlist can move behind title
-                  showNotification('Playlist moved behind title', 'success');
-                }}
-                title="Send to Back"
-              >
-                ⬇️
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {/* Custom Elements */}
-        {elements.map((element, index) => (
-          <div
-            key={element.id}
-            className={`p-2 rounded border-2 flex items-center justify-between cursor-pointer transition-colors ${selectedComponent === 'element' && selectedElementId === element.id
-              ? 'bg-blue-100 border-blue-500'
-              : 'bg-white border-gray-300 hover:bg-gray-50'
-              }`}
-            onClick={() => {
-              setSelectedComponent('element');
-              setSelectedElementId(element.id);
-            }}
-          >
-            <div className="flex items-center gap-2">
-              <span className="text-lg">
-                {element.type === 'text' ? '📝' : element.type === 'image' ? '🖼️' : '🔷'}
-              </span>
-              <span className="text-sm font-medium text-gray-700">
-                {element.type === 'text'
-                  ? `Text: "${element.text?.substring(0, 20)}${element.text && element.text.length > 20 ? '...' : ''}"`
-                  : element.type === 'image'
-                    ? 'Image'
-                    : element.type}
-              </span>
-            </div>
-            <div className="flex gap-1">
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  const elementIndex = elements.findIndex(el => el.id === element.id);
-                  if (elementIndex !== -1 && elementIndex < elements.length - 1) {
-                    const newElements = [...elements];
-                    const [movedElement] = newElements.splice(elementIndex, 1);
-                    newElements.push(movedElement);
-                    setElements(newElements);
-                    showNotification('Element moved to front', 'success');
-                  }
-                }}
-                disabled={index === elements.length - 1}
-                title="Bring to Front"
-              >
-                ⬆️
-              </Button>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  const elementIndex = elements.findIndex(el => el.id === element.id);
-                  if (elementIndex !== -1 && elementIndex > 0) {
-                    const newElements = [...elements];
-                    const [movedElement] = newElements.splice(elementIndex, 1);
-                    newElements.unshift(movedElement);
-                    setElements(newElements);
-                    showNotification('Element moved to back', 'success');
-                  }
-                }}
-                disabled={index === 0}
-                title="Send to Back"
-              >
-                ⬇️
-              </Button>
-            </div>
-          </div>
-        ))}
-
-        {elements.length === 0 && !showTitle && playlist.length === 0 && (
-          <div className="text-sm text-gray-500 text-center py-4">
-            No elements added yet
-          </div>
-        )}
+      {/* Info */}
+      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+        <p className="text-sm text-blue-800">
+          💡 <strong>Tip:</strong> This thumbnail will be used as the video cover. You can customize colors,
+          title, and text to match your brand. The playlist will appear as a list below the title.
+        </p>
       </div>
     </div>
-
-    {/* Selected Element Properties */}
-    {selectedComponent === 'element' && selectedElementId && (() => {
-      const selectedElement = elements.find(el => el.id === selectedElementId);
-      if (selectedElement?.type === 'text') {
-        return (
-          <div className="bg-white rounded-lg border border-blue-500 border-2 p-6">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">Text Element Properties ✓ Selected</h3>
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Text Content
-                </label>
-                <input
-                  type="text"
-                  value={selectedElement.text || ''}
-                  onChange={(e) => {
-                    setElements(elements.map(el =>
-                      el.id === selectedElementId
-                        ? { ...el, text: e.target.value, width: e.target.value.length * (selectedElement.fontSize || fontSize) * 0.6 }
-                        : el
-                    ));
-                  }}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                  placeholder="Enter text"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Font Family
-                </label>
-                <select
-                  value={selectedElement.fontFamily || 'Arial'}
-                  onChange={(e) => {
-                    setElements(elements.map(el =>
-                      el.id === selectedElementId
-                        ? { ...el, fontFamily: e.target.value }
-                        : el
-                    ));
-                  }}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                >
-                  <option value="Arial">Arial</option>
-                  <option value="Helvetica">Helvetica</option>
-                  <option value="Times New Roman">Times New Roman</option>
-                  <option value="Courier New">Courier New</option>
-                  <option value="Verdana">Verdana</option>
-                  <option value="Georgia">Georgia</option>
-                  <option value="Comic Sans MS">Comic Sans MS</option>
-                  <option value="Impact">Impact</option>
-                  <option value="Trebuchet MS">Trebuchet MS</option>
-                  <option value="Palatino">Palatino</option>
-                  <option value="Garamond">Garamond</option>
-                  <option value="Bookman">Bookman</option>
-                  <option value="Tahoma">Tahoma</option>
-                  <option value="Lucida Console">Lucida Console</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Text Color
-                </label>
-                <div className="flex items-center gap-3">
-                  <input
-                    type="color"
-                    value={selectedElement.color || textColor}
-                    onChange={(e) => {
-                      setElements(elements.map(el =>
-                        el.id === selectedElementId
-                          ? { ...el, color: e.target.value }
-                          : el
-                      ));
-                    }}
-                    className="w-16 h-10 rounded border border-gray-300 cursor-pointer"
-                  />
-                  <input
-                    type="text"
-                    value={selectedElement.color || textColor}
-                    onChange={(e) => {
-                      setElements(elements.map(el =>
-                        el.id === selectedElementId
-                          ? { ...el, color: e.target.value }
-                          : el
-                      ));
-                    }}
-                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                    placeholder="#FFFFFF"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Font Size: {selectedElement.fontSize || fontSize}px
-                </label>
-                <input
-                  type="range"
-                  min="24"
-                  max="120"
-                  value={selectedElement.fontSize || fontSize}
-                  onChange={(e) => {
-                    const newSize = Number(e.target.value);
-                    setElements(elements.map(el =>
-                      el.id === selectedElementId
-                        ? { ...el, fontSize: newSize, width: (el.text || '').length * newSize * 0.6, height: newSize }
-                        : el
-                    ));
-                  }}
-                  className="w-full"
-                />
-              </div>
-
-              {/* Layer Management */}
-              <div className="border-t border-gray-200 pt-4">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Layer Order
-                </label>
-                <div className="flex gap-2">
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => {
-                      // Bring to front (move to end of array)
-                      const elementIndex = elements.findIndex(el => el.id === selectedElementId);
-                      if (elementIndex !== -1 && elementIndex < elements.length - 1) {
-                        const newElements = [...elements];
-                        const [movedElement] = newElements.splice(elementIndex, 1);
-                        newElements.push(movedElement);
-                        setElements(newElements);
-                        showNotification('Element moved to top', 'success');
-                      }
-                    }}
-                    disabled={elements.findIndex(el => el.id === selectedElementId) === elements.length - 1}
-                  >
-                    ⬆️ Bring to Front
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => {
-                      // Send to back (move to beginning of array)
-                      const elementIndex = elements.findIndex(el => el.id === selectedElementId);
-                      if (elementIndex !== -1 && elementIndex > 0) {
-                        const newElements = [...elements];
-                        const [movedElement] = newElements.splice(elementIndex, 1);
-                        newElements.unshift(movedElement);
-                        setElements(newElements);
-                        showNotification('Element moved to back', 'success');
-                      }
-                    }}
-                    disabled={elements.findIndex(el => el.id === selectedElementId) === 0}
-                  >
-                    ⬇️ Send to Back
-                  </Button>
-                </div>
-              </div>
-            </div>
-          </div>
-        );
-      } else if (selectedElement?.type === 'image') {
-        return (
-          <div className="bg-white rounded-lg border border-blue-500 border-2 p-6">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">Image Element Properties ✓ Selected</h3>
-            <div className="space-y-4">
-              <div className="bg-gray-50 rounded-lg p-3 text-sm text-gray-600">
-                <p className="mb-1">
-                  <strong>Position:</strong> X: {selectedElement.x.toFixed(0)}, Y: {selectedElement.y.toFixed(0)}
-                </p>
-                <p className="mb-1">
-                  <strong>Size:</strong> {selectedElement.width?.toFixed(0)} × {selectedElement.height?.toFixed(0)} px
-                </p>
-                <p className="text-xs text-gray-500">
-                  💡 Click and drag to move, drag corners to resize
-                </p>
-              </div>
-
-              {/* Opacity */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Opacity: {Math.round((selectedElement.opacity !== undefined ? selectedElement.opacity : 1) * 100)}%
-                </label>
-                <input
-                  type="range"
-                  min="0"
-                  max="1"
-                  step="0.01"
-                  value={selectedElement.opacity !== undefined ? selectedElement.opacity : 1}
-                  onChange={(e) => {
-                    setElements(elements.map(el =>
-                      el.id === selectedElementId
-                        ? { ...el, opacity: Number(e.target.value) }
-                        : el
-                    ));
-                  }}
-                  className="w-full"
-                />
-              </div>
-
-              {/* Layer Management */}
-              <div className="border-t border-gray-200 pt-4">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Layer Order
-                </label>
-                <div className="flex gap-2">
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => {
-                      // Bring to front (move to end of array)
-                      const elementIndex = elements.findIndex(el => el.id === selectedElementId);
-                      if (elementIndex !== -1 && elementIndex < elements.length - 1) {
-                        const newElements = [...elements];
-                        const [movedElement] = newElements.splice(elementIndex, 1);
-                        newElements.push(movedElement);
-                        setElements(newElements);
-                        showNotification('Element moved to top', 'success');
-                      }
-                    }}
-                    disabled={elements.findIndex(el => el.id === selectedElementId) === elements.length - 1}
-                  >
-                    ⬆️ Bring to Front
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => {
-                      // Send to back (move to beginning of array)
-                      const elementIndex = elements.findIndex(el => el.id === selectedElementId);
-                      if (elementIndex !== -1 && elementIndex > 0) {
-                        const newElements = [...elements];
-                        const [movedElement] = newElements.splice(elementIndex, 1);
-                        newElements.unshift(movedElement);
-                        setElements(newElements);
-                        showNotification('Element moved to back', 'success');
-                      }
-                    }}
-                    disabled={elements.findIndex(el => el.id === selectedElementId) === 0}
-                  >
-                    ⬇️ Send to Back
-                  </Button>
-                </div>
-              </div>
-            </div>
-          </div>
-        );
-      }
-      return null;
-    })()}
-
-    {/* Info */}
-    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-      <p className="text-sm text-blue-800">
-        💡 <strong>Tip:</strong> This thumbnail will be used as the video cover. You can customize colors,
-        title, and text to match your brand. The playlist will appear as a list below the title.
-      </p>
-    </div>
-  </div>
-);
+  );
 });
 
 VideoEditor.displayName = 'VideoEditor';
