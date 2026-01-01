@@ -140,10 +140,14 @@ export const ExportPanel: React.FC = () => {
       // Load base background image
       const img = new Image();
       img.crossOrigin = 'anonymous';
+
+      // Use clean background if available (prevents double-playlist effect)
+      const imageSrc = thumbnailSettings.cleanBackgroundUrl || thumbnailSettings.thumbnailUrl;
+
       await new Promise((resolve, reject) => {
         img.onload = resolve;
         img.onerror = reject;
-        img.src = thumbnailSettings.thumbnailUrl;
+        img.src = imageSrc;
       });
 
       // Prepare canvas for drawing frames

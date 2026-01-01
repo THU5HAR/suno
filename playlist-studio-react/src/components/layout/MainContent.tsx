@@ -103,6 +103,7 @@ const MainContent: React.FC = () => {
                 if (typeof window !== 'undefined') {
                   (window as any).thumbnailSettings = {
                     thumbnailUrl: data.thumbnailUrl,
+                    cleanBackgroundUrl: data.cleanBackgroundUrl,
                     playlistPosition: data.playlistPosition
                   };
                 }
