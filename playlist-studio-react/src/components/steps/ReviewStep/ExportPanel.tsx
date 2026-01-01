@@ -170,7 +170,7 @@ export const ExportPanel: React.FC = () => {
       const imagePromises = elements
         .filter((el: any) => el.type === 'image' && el.imageUrl)
         .map((el: any) => {
-          return new Promise<{ id: string; img: HTMLImageElement }>((resolve, reject) => {
+          return new Promise<{ id: string; img: HTMLImageElement }>((resolve) => {
             const img = new Image();
             img.crossOrigin = 'anonymous';
             img.onload = () => resolve({ id: el.id, img });
@@ -182,8 +182,8 @@ export const ExportPanel: React.FC = () => {
           });
         });
 
-      await Promise.all(imagePromises);
-      imagePromises.forEach(({ id, img }) => {
+      const loadedImages = await Promise.all(imagePromises);
+      loadedImages.forEach(({ id, img }) => {
         if (img.complete) {
           imageMap.set(id, img);
         }
@@ -220,7 +220,7 @@ export const ExportPanel: React.FC = () => {
           if (index < playlist.length - 1 && delayBetweenSongs > 0) {
             accumulatedTime += delayBetweenSongs;
           }
-          
+
           const minutes = Math.floor(startTime / 60);
           const seconds = Math.floor(startTime % 60);
           return {
